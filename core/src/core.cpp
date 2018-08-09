@@ -240,7 +240,7 @@ void Core::received_message(const Message& message) {
 
 }
 
-void Core::send(const Message& message) {
+bool Core::send(const Message& message) {
 	
 	if (m_lock_send) {
 		m_send_mutex.lock();
@@ -248,12 +248,16 @@ void Core::send(const Message& message) {
 	
 	DEBUG_LOG_EXHAUSTIVE("Sending message:");
 	DEBUG_EXHAUSTIVE(message.print();)
-	canSend_driver(m_handle, &message);
+	uint8_t retval = canSend_driver(m_handle, &message);
 	
 	if (m_lock_send) {
 		m_send_mutex.unlock();
 	}
-
+	
+	if (retval != 0) {
+		return false;
+	}
+	return true;
 }
 
 } // namespace co
