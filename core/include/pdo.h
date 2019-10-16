@@ -86,7 +86,8 @@ namespace kaco {
 		/// \param cob_id COB-ID of the message to send
 		/// \param data A vector containing the data bytes to send. PDOs can have most 8 bytes!
 		/// \remark thread-safe
-		void send(uint16_t cob_id, const std::vector<uint8_t>& data);
+		/// \returns true if successful
+		bool send(uint16_t cob_id, const std::vector<uint8_t>& data);
 
 		/// Adds a callback which will be called when a PDO has been received with the given COB-ID.
 		/// \param cob_id COB-ID to listen for

@@ -80,7 +80,7 @@ void PDO::process_incoming_message(const Message& message) const {
 
 }
 
-void PDO::send(uint16_t cob_id, const std::vector<uint8_t>& data) {
+bool PDO::send(uint16_t cob_id, const std::vector<uint8_t>& data) {
 	
 	assert(data.size()<=8 && "[PDO::send] A PDO message can have at most 8 data bytes.");
 
@@ -95,7 +95,7 @@ void PDO::send(uint16_t cob_id, const std::vector<uint8_t>& data) {
 	DEBUG_LOG_EXHAUSTIVE("Sending the following PDO:");
 	DEBUG_EXHAUSTIVE(message.print();)
 
-	m_core.send(message);
+	return m_core.send(message);
 
 }
 
