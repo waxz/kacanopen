@@ -120,7 +120,7 @@ typedef struct {
 
 static thread_local CANPipe canpipes[MAX_NB_CAN_PIPES] = {{0,},{0,},{0,},{0,},{0,},{0,},{0,},{0,},{0,},{0,},{0,},{0,},{0,},{0,},{0,},{0,},};
 #define MAX_CHANNEL_NUM 2
-#define MAX_BUFFER_SIZE 100
+#define MAX_BUFFER_SIZE 1000
 typedef struct{
     unsigned int nDeviceType;
     int nDeviceInd;
@@ -143,17 +143,19 @@ UNS8 canReceive_driver(CAN_HANDLE fd0, Message *m)
 }
 
 // use fd0 as channel index
+///
+/// \param fd0
+/// \param m , caller buffer address
+/// \param len , caller max buffer size,
+/// \return
 UNS8 canReceiveBatch_driver(CAN_HANDLE fd0, Message *m, int* len )
 {
 
-    MLOGW("hello %ld", (long)fd0);
 
-    *len=0;
 
     CAN_Dev * can_dev = fd0;
     long nCANInd = can_dev->nChannel;
 
-    MLOGW("channel index [%ld]", nCANInd);
 
 
     if(nCANInd <0 || nCANInd >= MAX_CHANNEL_NUM){
@@ -164,7 +166,6 @@ UNS8 canReceiveBatch_driver(CAN_HANDLE fd0, Message *m, int* len )
         MLOGW("channel [%ld] not init ok ", nCANInd);
         return -1;
     }
-    MLOGW("channel [%ld] init ok ", nCANInd);
 
     DWORD size;
 
@@ -172,20 +173,32 @@ UNS8 canReceiveBatch_driver(CAN_HANDLE fd0, Message *m, int* len )
 
     if( (nCANInd ==0) || (nCANInd ==1)){
         size = VCI_GetReceiveNum(can_dev->nDeviceType, can_dev->nDeviceInd, nCANInd);
-        MLOGW("channel [%ld] VCI_GetReceiveNum [%d]", nCANInd,size);
+//        MLOGW("channel [%ld] VCI_GetReceiveNum [%d]", nCANInd,size);
 
-        if(!size) return 0;
-        size = MIN(size,MAX_BUFFER_SIZE);
+        if(!size){
+            *len = 0;
+            return 0;
+        }
+        size =MIN(MIN(size,MAX_BUFFER_SIZE), *len) ;
 
 
-        VCI_Receive(can_dev->nDeviceType, can_dev->nDeviceInd, nCANInd, recv_vco, size, can_dev->nMaxWaitMs);
-        MLOGW("channel [%ld] recv [%d] msg", nCANInd,size);
+        DWORD dwRel = VCI_Receive(can_dev->nDeviceType, can_dev->nDeviceInd, nCANInd, recv_vco, size, can_dev->nMaxWaitMs);
+        if (dwRel != STATUS_OK)
+        {
+
+#if 0
+            dwRel = VCI_ResetCAN(can_dev->nDeviceType, can_dev->nDeviceInd, nCANInd);
+            return 0;
+
+#endif
+        }
+        //        MLOGW("channel [%ld] recv [%d] msg", nCANInd,size);
         *len = size;
 
         for(long i = 0 ; i < size; i++){
 
             if(recv_vco[i].ExternFlag){
-                MLOGW("VCI_Receive ExternFlag %d", recv_vco[i].ExternFlag);
+//                MLOGW("VCI_Receive ExternFlag %d", recv_vco[i].ExternFlag);
                 return -2;
             }else{
                 m[i].cob_id = recv_vco[i].ID;
@@ -252,6 +265,14 @@ UNS8 canSendBatch_driver(CAN_HANDLE fd0, Message *m, int len )
     }
     DWORD dwRel = VCI_Transmit(can_dev->nDeviceType, can_dev->nDeviceInd, nCANInd, send_vco, size);
 
+    if (dwRel != STATUS_OK)
+    {
+#if 0
+        dwRel = VCI_ResetCAN(can_dev->nDeviceType, can_dev->nDeviceInd, nCANInd);
+        return 0;
+
+#endif
+    }
 
 }
 

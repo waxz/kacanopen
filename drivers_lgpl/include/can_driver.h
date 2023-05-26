@@ -134,6 +134,7 @@ static inline void print_message(Message const *m)
         }
     }
     MSG(" rtr:%d", m->rtr);
+    MSG(" ext:%d", m->ext);
     MSG(" len:%d", m->len);
     for (i = 0 ; i < m->len ; i++)
         MSG(" %02x", m->data[i]);
