@@ -44,6 +44,9 @@ struct Message {
 	/// Remote transmission request (0 if it's not an RTR message, 1 if it is an RTR message)
 	uint8_t rtr;
 
+    /**< Extern. (0 if not rtr message, 1 if rtr message) */
+    uint8_t ext;
+
 	/// Message's length (0 to 8)
 	uint8_t len;
 

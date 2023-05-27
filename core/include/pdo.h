@@ -59,7 +59,7 @@ namespace kaco {
 		struct PDOReceivedCallback {
 
 			/// Type of the callback
-			using Callback = std::function< void(std::vector<uint8_t>) >;
+			using Callback = std::function< void(const kaco::Message&) >;
 
 			/// The COB-ID of the PDO to receive
 			uint16_t cob_id;
@@ -82,7 +82,11 @@ namespace kaco {
 		/// \remark thread-safe
 		void process_incoming_message(const Message& message) const;
 
-		/// Sends a PDO message
+//        void process_incoming_tpdo(const Message& message) const;
+        void process_incoming_rpdo(const Message& message) const;
+
+
+        /// Sends a PDO message
 		/// \param cob_id COB-ID of the message to send
 		/// \param data A vector containing the data bytes to send. PDOs can have most 8 bytes!
 		/// \remark thread-safe
@@ -95,6 +99,7 @@ namespace kaco {
 		/// \todo Rename this to add_tpdo_received_callback() and add add_rpdo_received_callback()
 		/// \remark thread-safe
 		void add_pdo_received_callback(uint16_t cob_id, PDOReceivedCallback::Callback callback);
+        void add_rpdo_received_callback(uint16_t cob_id, PDOReceivedCallback::Callback callback);
 
 	private:
 
@@ -102,7 +107,10 @@ namespace kaco {
 		Core& m_core;
 
 		std::vector<PDOReceivedCallback> m_receive_callbacks;
-		mutable std::mutex m_receive_callbacks_mutex;
+        std::vector<PDOReceivedCallback> m_receive_rpdo_callbacks;
+		mutable std::mutex m_receive_tpdo_callbacks_mutex;
+        mutable std::mutex m_receive_rpdo_callbacks_mutex;
+
 
 	};
 

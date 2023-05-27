@@ -94,7 +94,9 @@ namespace kaco {
 		/// \remark thread-safe
 		void process_incoming_message(const Message& message);
 
-		/// Sends an SDO message and waits for the response.
+
+        void process_incoming_client_sdo(const Message& message);
+        /// Sends an SDO message and waits for the response.
 		/// \param command SDO command specifier
 		/// \param node_id Node id of remote device
 		/// \param index Dictionary index

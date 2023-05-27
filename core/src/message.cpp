@@ -49,6 +49,7 @@ void Message::print() const {
 
 	DUMP_HEX(cob_id);
 	DUMP_HEX(rtr);
+    DUMP_HEX(ext);
 	DUMP_HEX(len);
 	DUMP_HEX(get_function_code());
 	DUMP_HEX(get_node_id());

@@ -59,12 +59,29 @@ struct CANBoard {
 	
 };
 
+#define MAX_CHANNEL_NUM 2
+#define MAX_BUFFER_SIZE 100
+    typedef struct{
+        unsigned int nDeviceType;
+        int nDeviceInd;
+        int nRunning;
+        int nMaxChannel;
+        int nMaxWaitMs;
+        int nChannel; // active channel used in send and recv
+        int nChannelStatus[MAX_CHANNEL_NUM]; //0 : init value, 1 : ok, -1 : error
+    } CAN_Dev;
+#undef MAX_CHANNEL_NUM
+#undef MAX_BUFFER_SIZE
+
+
 /// This type is returned by the CAN driver
 /// to identify the driver instance.
 typedef void* CANHandle;
 
 extern "C" uint8_t canReceive_driver(CANHandle, Message *);
+extern "C" uint8_t canReceiveBatch_driver(CANHandle, Message *, int* );
 extern "C" uint8_t canSend_driver(CANHandle, Message const *);
+extern "C" uint8_t canSendBatch_driver(CANHandle, Message const *, int);
 extern "C" CANHandle canOpen_driver(CANBoard *);
 extern "C" int32_t canClose_driver(CANHandle);
 extern "C" uint8_t canChangeBaudRate_driver(CANHandle, char *);
@@ -79,10 +96,15 @@ Core::~Core() {
 	if (m_running) {
 		stop();
 	}
+    close();
 }
 
-bool Core::start(const std::string busname, const std::string& baudrate) {
+bool Core::start(const std::string& busname, const std::string& baudrate) {
 
+    if(m_handle != 0){
+        std::cerr << "opening device, but can diver is opened"<< std::endl;
+        return false;
+    }
 	assert(!m_running);
 
 	CANBoard board = {busname.c_str(), baudrate.c_str()};
@@ -93,13 +115,11 @@ bool Core::start(const std::string busname, const std::string& baudrate) {
 		return false;
 	}
 
-	m_running = true;
-	m_loop_thread = std::thread(&Core::receive_loop, this, std::ref(m_running));
 	return true;
 
 }
 
-bool Core::start(const std::string busname, const unsigned baudrate) {
+bool Core::start(const std::string& busname, const unsigned baudrate) {
 	if (baudrate>=1000000 && baudrate%1000000==0) {
 		return start(busname, std::to_string(baudrate/1000000)+"M");
 	} else if (baudrate>=1000 && baudrate%1000==0) {
@@ -110,25 +130,46 @@ bool Core::start(const std::string busname, const unsigned baudrate) {
 }
 
 void Core::stop() {
+    m_running = false;
+    if(m_loop_thread.joinable()){
+        m_loop_thread.join();
+    }
+}
 
-	assert(m_running);
+void Core::close() {
+    if(m_handle == 0){
+        std::cerr << "closing device, but can diver is not opened"<< std::endl;
+        return;
+    }
+    DEBUG_LOG("Calling canClose.");
+    canClose_driver(m_handle);
+    m_handle = 0;
+}
 
-	m_running = false;
-	m_loop_thread.detach();
+bool Core::start_loop(){
+    if(m_handle == 0){
+        std::cerr << "can diver is not opened"<< std::endl;
+        return false;
+    }
+    m_running = true;
+    m_loop_thread = std::thread(&Core::receive_loop, this, std::ref(m_running));
 
-	DEBUG_LOG("Calling canClose.");
-	canClose_driver(m_handle);
-
+    return true;
 }
 
 void Core::receive_loop(std::atomic<bool>& running) {
 
+    if(m_handle == 0){
+        std::cerr << "can diver is not opened"<< std::endl;
+        return;
+    }
 	Message message;
 
 	while (running) {
 
-		canReceive_driver(m_handle, &message);
-		received_message(message);
+		if(canReceive_driver(m_handle, &message) ==0){
+            received_message(message);
+        }
 
 	}
 
@@ -137,6 +178,26 @@ void Core::receive_loop(std::atomic<bool>& running) {
 void Core::register_receive_callback(const MessageReceivedCallback& callback) {
 	std::lock_guard<std::mutex> scoped_lock(m_receive_callbacks_mutex);
 	m_receive_callbacks.push_back(callback);
+}
+void Core::recv_message(std::vector<Message>& msg_buffer, int channel, int max_num){
+    if(m_handle == 0){
+        std::cerr << "can diver is not opened"<< std::endl;
+        return;
+    }
+    CAN_Dev * can_dev =static_cast<CAN_Dev *>(m_handle) ;
+
+    if(channel < 0 || channel >= can_dev->nMaxChannel-1){
+        std::cerr << "recv message, but can diver channel is wrong " << channel  << ", nMaxChannel : " << can_dev->nMaxChannel << std::endl;
+        return;
+    }
+
+
+    can_dev->nChannel = channel;
+    canReceiveBatch_driver(m_handle,msg_buffer.data(),&max_num);
+//    std::cout << "get " << max_num << "msg" << std::endl;
+    for(int i = 0 ; i < max_num; i++ ){
+        received_message(msg_buffer[i]);
+    }
 }
 
 void Core::received_message(const Message& message) {
@@ -203,6 +264,7 @@ void Core::received_message(const Message& message) {
 		case 10: {
 			// TODO: Implement this for slave functionality
 			// 	-> delegate to pdo.process_incoming_rpdo()
+            pdo.process_incoming_rpdo(message);
 			DEBUG_LOG("PDO receive");
 			DEBUG(message.print();)
 			break;
@@ -223,7 +285,7 @@ void Core::received_message(const Message& message) {
 		}
 		
 		case 14: {
-			// NMT Error Control
+			// HeartBeat, aka NMT Error Control
 			nmt.process_incoming_message(message);
 			break;
 		}
@@ -241,7 +303,11 @@ void Core::received_message(const Message& message) {
 }
 
 bool Core::send(const Message& message) {
-	
+
+    if(m_handle == 0){
+        std::cerr << "can diver is not opened"<< std::endl;
+        return false;
+    }
 	if (m_lock_send) {
 		m_send_mutex.lock();
 	}
@@ -258,6 +324,46 @@ bool Core::send(const Message& message) {
 		return false;
 	}
 	return true;
+}
+
+bool Core::send(const Message& message,int  channel) {
+    return send(&message,1,channel);
+}
+
+bool Core::send(const std::vector<Message>& message,int channel){
+    return send(message.data(),message.size(),channel);
+}
+
+bool Core::send(const Message * message,int len, int channel){
+    if(m_handle == 0){
+        std::cerr << "can diver is not opened"<< std::endl;
+        return false;
+    }
+    CAN_Dev * can_dev =static_cast<CAN_Dev *>(m_handle) ;
+    if(channel < 0 || channel >= can_dev->nMaxChannel){
+        std::cerr << "sending message, but can diver channel is wrong " << channel  << ", nMaxChannel : " << can_dev->nMaxChannel << std::endl;
+        return false;
+    }
+
+    if (m_lock_send) {
+        m_send_mutex.lock();
+    }
+//    std::cerr << "sending message to channel " << channel  << " message:\n";
+//    message->print();
+
+    can_dev->nChannel = channel;
+    DEBUG_LOG_EXHAUSTIVE("Sending message:");
+    DEBUG_EXHAUSTIVE(message.print();)
+//    uint8_t retval = canSend_driver(m_handle, &message);
+    uint8_t retval = canSendBatch_driver(m_handle, message,len );
+    if (m_lock_send) {
+        m_send_mutex.unlock();
+    }
+
+    if (retval != 0) {
+        return false;
+    }
+    return true;
 }
 
 } // namespace co

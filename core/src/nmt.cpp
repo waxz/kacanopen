@@ -46,12 +46,46 @@ NMT::NMT(Core& core)
 
 void NMT::send_nmt_message(uint8_t node_id, Command cmd) {
 	DEBUG_LOG("Set NMT state of "<<(unsigned)node_id<<" to "<<static_cast<uint32_t>(cmd));
-	const Message message = { 0x0000, false, 2, {static_cast<uint8_t>(cmd),node_id,0,0,0,0,0,0} };
+	const Message message = { 0x0000, false, 0,2, {static_cast<uint8_t>(cmd),node_id,0,0,0,0,0,0} };
 	m_core.send(message);
 }
 
+void NMT::send_nmt_message(uint8_t node_id, Command cmd,const std::function<int(const Message&)>& func) {
+    DEBUG_LOG("Set NMT state of "<<(unsigned)node_id<<" to "<<static_cast<uint32_t>(cmd));
+    const Message message = { 0x0000, false, 0,2, {static_cast<uint8_t>(cmd),node_id,0,0,0,0,0,0} };
+    func(message);
+}
+
+
+void NMT::send_heartbeat_message(uint8_t node_id, NodeState state) {
+    DEBUG_LOG("Set HEARTBEAT state of "<<(unsigned)node_id<<" to "<<static_cast<uint32_t>(state));
+    uint16_t cob_id = 0x0700 + node_id;
+    const Message message = { cob_id, false, 0,1, {static_cast<uint8_t>(state),0,0,0,0,0,0,0} };
+    m_core.send(message);
+}
+
+void NMT::send_heartbeat_message(uint8_t node_id, NodeState state,const std::function<int(const Message&)>& func) {
+    DEBUG_LOG("Set HEARTBEAT state of "<<(unsigned)node_id<<" to "<<static_cast<uint32_t>(state));
+    uint16_t cob_id = 0x0700 + node_id;
+    const Message message = { cob_id, false, 0,1, {static_cast<uint8_t>(state),0,0,0,0,0,0,0} };
+    func(message);
+}
+
+void NMT::send_sync_message() {
+//    const kaco::Message message = { 0x80, false, 1, {sync_counter++,0,0,0,0,0,0,0} };
+    const kaco::Message message = { 0x80, false, 0,0, {0,0,0,0,0,0,0,0} };
+    m_core.send(message);
+}
+void NMT::send_sync_message(const std::function<int(const Message&)>& func) {
+//    const kaco::Message message = { 0x80, false, 1, {sync_counter++,0,0,0,0,0,0,0} };
+    const kaco::Message message = { 0x80, false, 0,0, {0,0,0,0,0,0,0,0} };
+    func(message);
+}
 void NMT::broadcast_nmt_message(Command cmd) {
 	send_nmt_message(0, cmd);
+}
+void NMT::broadcast_nmt_message(Command cmd,const std::function<int(const Message&)>& func) {
+    send_nmt_message(0, cmd,func);
 }
 
 void NMT::reset_all_nodes() {
@@ -63,19 +97,37 @@ void NMT::reset_all_nodes() {
 		std::this_thread::sleep_for(pause);
 	}
 }
-
+void NMT::reset_all_nodes(const std::function<int(const Message&)>& func) {
+    //broadcast_nmt_message(Command::reset_node);
+    // TODO check node_id range
+    const auto pause = std::chrono::milliseconds(CONSECUTIVE_SEND_PAUSE_MS);
+    for (size_t node_id = 1; node_id < 239; ++node_id) {
+        send_nmt_message(node_id, Command::reset_node,func);
+        std::this_thread::sleep_for(pause);
+    }
+}
 void NMT::discover_nodes() {
 	// TODO check node_id range
 	const auto pause = std::chrono::milliseconds(CONSECUTIVE_SEND_PAUSE_MS);
 	for (size_t node_id = 1; node_id < 239; ++node_id) {
 		// Protocol node guarding. See CiA 301. All devices will answer with their state via NMT.
 		uint16_t cob_id = 0x700+node_id;
-		const Message message = { cob_id, true, 0, {0,0,0,0,0,0,0,0} };
+		const Message message = { cob_id, true, 0,0, {0,0,0,0,0,0,0,0} };
 		m_core.send(message);
 		std::this_thread::sleep_for(pause);
 	}
 }
-
+void NMT::discover_nodes(const std::function<int(const Message&)>& func) {
+    // TODO check node_id range
+    const auto pause = std::chrono::milliseconds(CONSECUTIVE_SEND_PAUSE_MS);
+    for (size_t node_id = 1; node_id < 239; ++node_id) {
+        // Protocol node guarding. See CiA 301. All devices will answer with their state via NMT.
+        uint16_t cob_id = 0x700+node_id;
+        const Message message = { cob_id, true, 0,0, {0,0,0,0,0,0,0,0} };
+        func(message);
+        std::this_thread::sleep_for(pause);
+    }
+}
 void NMT::process_incoming_message(const Message& message) {
 
 	DEBUG_LOG("NMT Error Control message from node "
@@ -118,9 +170,8 @@ void NMT::process_incoming_message(const Message& message) {
 					// otherwise the immediately called future destructor
 					// blocks until callback has finished.
 					std::lock_guard<std::mutex> scoped_lock(m_callback_futures_mutex);
-					m_callback_futures.push_front(
-						std::async(std::launch::async, callback, message.get_node_id())
-					);
+//					m_callback_futures.push_front(std::async(std::launch::async, callback, message));
+                    callback(message);
 				}
 			}
 			break;

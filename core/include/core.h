@@ -81,7 +81,7 @@ namespace kaco {
 		///                 "1M", "500K", "125K", "100K", "50K", "20K", "10K" and "5K".
 		/// \returns true if successful
 		/// \remark Core must not run yet.
-		bool start(const std::string busname, const std::string& baudrate);
+		bool start(const std::string& busname, const std::string& baudrate);
 		
 		/// Opens CAN driver and starts CAN message receive loop.
 		///	\param busname Name of the bus which will be passed to the CAN driver, e.g. slcan0
@@ -91,16 +91,31 @@ namespace kaco {
 		///                 are postfixed with "K". E.g. 1000000->"1M", 500000->"500K" and 5000->"5K".
 		/// \returns true if successful
 		/// \remark Core must not run yet.
-		bool start(const std::string busname, const unsigned baudrate);
-		
+		bool start(const std::string& busname, const unsigned baudrate);
+
+
+        bool start_loop();
+
 		/// Stops the receive loop and closes the driver.
 		/// \remark Core must be running.
 		void stop();
+
+        void close();
 
 		/// Sends a message
 		/// \remark thread-safe if m_lock_send==true or driver is thread-safe.
 		/// \returns true if successful
 		bool send(const Message& message);
+
+        //
+        bool send(const Message& message,int channel);
+
+        /// send batch messages at once, need hardware support
+        bool send(const std::vector<Message>& message,int channel);
+
+        bool send(const Message * message,int len, int channel);
+
+        void recv_message(std::vector<Message>& m, int channel, int max_num);
 
 		/// Registers a callback function which is called when a message has been received.
 		/// \remark thread-safe
@@ -115,6 +130,7 @@ namespace kaco {
 		/// The PDO sub-protocol
 		PDO pdo;
 
+        void* m_handle = 0;
 
 	private:
 
@@ -125,7 +141,6 @@ namespace kaco {
 
 		std::atomic<bool> m_running{false};
 		std::thread m_loop_thread;
-		void* m_handle;
 
 		std::vector<MessageReceivedCallback> m_receive_callbacks;
 		mutable std::mutex m_receive_callbacks_mutex;
