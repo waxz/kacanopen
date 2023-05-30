@@ -88,12 +88,30 @@ namespace control {
         state_code = StateCode::Uninitialised;
         time = common::FromUnixNow();
         position.set(0.0, 0.0, 0.0);
-
+        odom_flag = 0;
+        actual_forward_vel = 0.0;
+        actual_forward_angle = 0.0;
+        actual_rotate_vel = 0.0;
     }
 
+    const transform::Transform2d &DoubleSteerController::getPosition() {
+        return position;
+    }
+    float DoubleSteerController::getActualForwardVel() {
+        return actual_forward_vel;
+    }
+
+    float DoubleSteerController::getActualForwardAngle() {
+        return actual_forward_angle;
+    }
+
+    float DoubleSteerController::getActualRotateVel() {
+        return actual_rotate_vel;
+    }
     void DoubleSteerController::cmd_vel(float forward_vel, float rot_vel) {
         cmd_vel(forward_vel, rot_vel, 0.0);
     }
+
 
     void DoubleSteerController::cmd_vel(float forward_vel, float rot_vel, float forward_angle) {
 
@@ -472,6 +490,7 @@ namespace control {
         constrain_rotate_radius_2 = m_steer_wheel[1].mount_position_x > 0.0 ? constrain_rotate_radius_2 : -constrain_rotate_radius_2;
 
 
+        bool is_command_move = std::abs(m_steer_wheel[0].actual_forward_vel) > 0.0001f || std::abs(m_steer_wheel[1].actual_forward_vel) > 0.0001f;
 
         bool is_rotate = std::abs(constrain_vel_vertical_1 - constrain_vel_vertical_2) > 0.01;
 
@@ -481,10 +500,40 @@ namespace control {
         float base_vel_y = 0.0;
         float base_vel_yaw = 0.0;
 
+        if(!is_command_move){
+            // not move
+            actual_forward_vel = 0.0;
+            actual_forward_angle = 0.0;
+            actual_rotate_vel = 0.0;
+            return;
+        }
+
         if(is_rotate){
 
             float constrain_rotate_radius = (constrain_vel_vertical_1 * constrain_rotate_radius_2 - constrain_vel_vertical_2*constrain_rotate_radius_1)/(constrain_vel_vertical_1 - constrain_vel_vertical_2);
 
+            float rot_vel_1 = constrain_vel_vertical_1/(constrain_rotate_radius_1 - constrain_rotate_radius);
+            float rot_vel_2 = constrain_vel_vertical_2/(constrain_rotate_radius_2 - constrain_rotate_radius);
+
+            actual_rotate_vel = 0.5f*(rot_vel_1 + rot_vel_2);
+
+            constrain_vel_vertical =actual_rotate_vel *  -constrain_rotate_radius;
+            PLOGD << "check_vertical constrain_rotate_radius: "   << constrain_rotate_radius_1 << ", " << constrain_rotate_radius_2 << ", "<< constrain_rotate_radius;
+
+            PLOGD << "check_vertical rot_vel: " << rot_vel_1 << ", " << rot_vel_2;
+            PLOGD << "check_vertical vel_vertical: " << constrain_vel_vertical_1 << ", " << constrain_vel_vertical_2 << ", " << constrain_vel_vertical;
+
+
+            base_vel_x = constrain_vel_along*std::cos(constrain_angle) + constrain_vel_vertical*std::cos(constrain_angle + M_PI_2f32);
+            base_vel_y = constrain_vel_along*std::sin(constrain_angle) + constrain_vel_vertical*std::sin(constrain_angle + M_PI_2f32);
+
+
+            actual_forward_vel = std::sqrt(base_vel_x*base_vel_x + base_vel_y*base_vel_y);
+            actual_forward_angle = std::atan2(base_vel_y,base_vel_x);
+
+            PLOGD << "actual_forward_vel: " << actual_forward_vel ;
+            PLOGD << "actual_forward_angle: " << actual_forward_angle ;
+            PLOGD << "actual_rotate_vel: " << actual_rotate_vel ;
 
         }else{
 
@@ -498,6 +547,39 @@ namespace control {
 
             base_vel_x = 0.5f*(wheel_vel_x_1 + wheel_vel_x_2);
             base_vel_y = 0.5f*(wheel_vel_y_1 + wheel_vel_y_2);
+
+            actual_forward_vel = std::sqrt(base_vel_x*base_vel_x + base_vel_y*base_vel_y);
+            actual_forward_angle = std::atan2(base_vel_y,base_vel_x);
+            actual_rotate_vel = 0.0;
+            PLOGD << "actual_forward_vel: " << actual_forward_vel ;
+            PLOGD << "actual_forward_angle: " << actual_forward_angle ;
+            PLOGD << "actual_rotate_vel: " << actual_rotate_vel ;
+        }
+
+
+        {
+            // simulate movement
+
+            if(odom_flag == 0){
+
+                time = common::FromUnixNow();
+
+                odom_flag ++;
+            }
+
+            common::Time  now =  common::FromUnixNow();
+
+            float update_s = common::ToMicroSeconds(now - time) * 1e-6;
+            time = now;
+            float update_step = 1e-3f;
+
+            transform::Transform2d relative_pose;
+            while (update_s > 0.0){
+                float s = std::min(update_step, update_s);
+                relative_pose.set(base_vel_x * s, base_vel_y * s,actual_rotate_vel*s );
+                position = position * relative_pose;
+                update_s -= update_step;
+            }
 
 
 

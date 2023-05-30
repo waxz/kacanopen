@@ -147,6 +147,7 @@ namespace control {
         bool control_need_rot_sync = false;
 
 
+        size_t odom_flag = 0;
         // fault
         StateCode state_code = StateCode::Uninitialised;
 
@@ -159,6 +160,11 @@ namespace control {
 
         // robot position in odom frame, start from [0.0,0.0,0.0]
         transform::Transform2d position;
+        // veclocity
+        float actual_forward_vel = 0.0;
+        float actual_forward_angle = 0.0;
+        float actual_rotate_vel = 0.0;
+
 
         // rotate center
         // relative to base_link
@@ -187,9 +193,10 @@ namespace control {
 
         bool smooth_stop = true;
 
-        const transform::Transform2d& getPosition(){
-            return position;
-        }
+        virtual const transform::Transform2d& getPosition() = 0;
+        virtual float getActualForwardVel() = 0;
+        virtual float getActualForwardAngle() = 0;
+        virtual float getActualRotateVel()=0;
         virtual void reset() = 0;
 
         ///
@@ -245,6 +252,14 @@ namespace control {
         void interpolate();
 
         void updateState(float forward_vel_1, float rot_angle_1, float forward_vel_2, float rot_angle_2);
+
+        float getActualForwardVel() override;
+        float getActualForwardAngle() override;
+        float getActualRotateVel() override;
+        const transform::Transform2d & getPosition() override;
+
+
+
     };
 
 }
