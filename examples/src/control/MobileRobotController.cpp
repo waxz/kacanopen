@@ -505,15 +505,31 @@ namespace control {
             actual_forward_vel = 0.0;
             actual_forward_angle = 0.0;
             actual_rotate_vel = 0.0;
+            PLOGD << "position:\n" << position;
             return;
         }
 
         if(is_rotate){
 
+
             float constrain_rotate_radius = (constrain_vel_vertical_1 * constrain_rotate_radius_2 - constrain_vel_vertical_2*constrain_rotate_radius_1)/(constrain_vel_vertical_1 - constrain_vel_vertical_2);
 
-            float rot_vel_1 = constrain_vel_vertical_1/(constrain_rotate_radius_1 - constrain_rotate_radius);
-            float rot_vel_2 = constrain_vel_vertical_2/(constrain_rotate_radius_2 - constrain_rotate_radius);
+            float rot_vel_1 = 0.0;
+            float rot_vel_2 = 0.0;
+            if(std::abs(constrain_vel_vertical_1) > 0.001 && std::abs(constrain_vel_vertical_2) > 0.001 ){
+                rot_vel_1 = constrain_vel_vertical_1/(constrain_rotate_radius_1 - constrain_rotate_radius);
+                rot_vel_2 = constrain_vel_vertical_2/(constrain_rotate_radius_2 - constrain_rotate_radius);
+
+            }else if (std::abs(constrain_vel_vertical_1) < 0.001 ){
+                rot_vel_2 = constrain_vel_vertical_2/(constrain_rotate_radius_2 - constrain_rotate_radius);
+                rot_vel_1 = rot_vel_2;
+
+            }else if (std::abs(constrain_vel_vertical_2) < 0.001 ){
+                rot_vel_1 = constrain_vel_vertical_1/(constrain_rotate_radius_1 - constrain_rotate_radius);
+                rot_vel_2 =  rot_vel_1;
+            }
+
+
 
             actual_rotate_vel = 0.5f*(rot_vel_1 + rot_vel_2);
 
@@ -564,7 +580,9 @@ namespace control {
 
                 time = common::FromUnixNow();
 
+                position.set(0.0,0.0,0.0);
                 odom_flag ++;
+                return;
             }
 
             common::Time  now =  common::FromUnixNow();
@@ -574,12 +592,13 @@ namespace control {
             float update_step = 1e-3f;
 
             transform::Transform2d relative_pose;
-            while (update_s > 0.0){
+            while (update_s > 0.0001){
                 float s = std::min(update_step, update_s);
                 relative_pose.set(base_vel_x * s, base_vel_y * s,actual_rotate_vel*s );
                 position = position * relative_pose;
                 update_s -= update_step;
             }
+            PLOGD << "position:\n" << position;
 
 
 
