@@ -377,7 +377,7 @@ print("start lua state")
     std::vector<float> command_array;
 
 
-    float forward_vel_acc = 0.5;
+    float forward_vel_acc = 0.8;
     float rotate_angle_vel = 0.8;
 
     auto cli
@@ -601,7 +601,7 @@ print("start lua state")
 
 
     rosMessageManager.add_channel<common_message::Twist>("SUB:control_cmd_vel:10");
-    rosMessageManager.add_channel<common_message::Odometry>("PUB:odom:10");
+    rosMessageManager.add_channel<common_message::Odometry>("PUB:odom:200");
 
     std::vector<common_message::Twist> cmd_vel_msgs(10);
     common_message::Odometry odom;
@@ -615,9 +615,18 @@ print("start lua state")
 
     odom.pose.covariance[0] = 0.1;
     odom.pose.covariance[7] = 0.1;
+    odom.pose.covariance[14] = 0.1;
+    odom.pose.covariance[21] = 0.1;
+    odom.pose.covariance[28] = 0.1;
+
     odom.pose.covariance[35] = 0.1;
     odom.twist.covariance[0] = 0.1;
     odom.twist.covariance[7] = 0.1;
+
+    odom.twist.covariance[14] = 0.1;
+    odom.twist.covariance[21] = 0.1;
+    odom.twist.covariance[28] = 0.1;
+
     odom.twist.covariance[35] = 0.1;
 
 
@@ -1108,6 +1117,8 @@ print("start lua state")
              continue;
          }
 
+        bool is_fault = false;
+
          bool all_find_home = true;
          bool all_no_fault = true;
          bool skip = false;
@@ -1115,24 +1126,19 @@ print("start lua state")
 
         for(auto& i :used_controller_id){
             all_find_home =  all_find_home && (SteerStateArray[i].msg_num >0)  &&
-                             SteerStateArray[i].ready;
+                             SteerStateArray[i].find_home;
 
             all_no_fault = all_no_fault && (SteerStateArray[i].fault_flag == 0);
 
         }
 
-         if(all_find_home && all_no_fault){
-
-         }else{
+         if(!all_find_home) {
              std::cout<< "controller not ready or not receive feedback"<< std::endl;
              for(auto& i :used_controller_id){
                   PLOGD   << i  <<   ", recv_num: " << SteerStateArray[i].msg_num  << ", find home: "<<   SteerStateArray[i].find_home << ", fault: "<< SteerStateArray[i].fault_flag << ", is_short: " << SteerStateArray[i].is_Short;
 
              }
-             skip = true;
-
-
-//             continue;
+             continue;
          }
 
          bool timeout = false;
@@ -1151,15 +1157,16 @@ print("start lua state")
         if(timeout){
             std::cout<< "controller feedback timeout"<< std::endl;
             skip = true;
-//            continue;
+            // reset cmd_vel
+
+
         }
 
 
         {
 
-            bool is_fault = false;
             for(auto& i :used_controller_id){
-                if(SteerStateArray[i].msg_num >0 && SteerStateArray[i].fault_flag != 0){
+                if( timeout || (SteerStateArray[i].msg_num >0 && SteerStateArray[i].fault_flag != 0) || ( SteerStateArray[i].msg_num >0 && std::abs(controller.m_steer_wheel[i].actual_forward_vel ) < 0.0001   &&  std::abs( controller.m_steer_wheel[i].getCommandForwardVel() - controller.m_steer_wheel[i].actual_forward_vel ) > 0.0001 ) ){
                     is_fault = true;
 
                     std::copy(std::begin(SteerStateArray[i].recv_message.data),std::end(SteerStateArray[i].recv_message.data), std::begin(SteerStateArray[i].command_message.data));
@@ -1172,25 +1179,32 @@ print("start lua state")
                 }
 
             }
-            if(is_fault){
-                {
-                    recv_cmd_vel_msg.linear.x = 0.0;
-                    recv_cmd_vel_msg.angular.z = 0.0;
-                }
-                continue;
+
+        }
+
+
+
+        rosMessageManager.recv_message("control_cmd_vel",10,0.001, cmd_vel_sub_cb);
+        if(timeout || !all_no_fault){
+
+            {
+                recv_cmd_vel_msg.linear.x = 0.0;
+                recv_cmd_vel_msg.linear.y = 0.0;
+                recv_cmd_vel_msg.angular.z = 0.0;
+            }
+
+            for(auto& i :used_controller_id){
+
+                SteerStateArray[i].forward_vel = 0.0;
+//                SteerStateArray[i].forward_vel = 0.0;
             }
         }
 
 
-        if(skip){
-            continue;
-        }
 
-        rosMessageManager.recv_message("control_cmd_vel",10,0.001, cmd_vel_sub_cb);
-
-        bool update = true;
+        bool update = false;
         for(auto& i :used_controller_id){
-            update =  update &&  SteerStateArray[i].updated;
+            update =  update ||  SteerStateArray[i].updated;
         }
        if(update) {
            for(auto& i :used_controller_id){
@@ -1267,6 +1281,7 @@ print("start lua state")
                // reset cmd_vel
                {
                    recv_cmd_vel_msg.linear.x = 0.0;
+                   recv_cmd_vel_msg.linear.y = 0.0;
                    recv_cmd_vel_msg.angular.z = 0.0;
                }
 
@@ -1334,6 +1349,8 @@ print("start lua state")
            }
 
 
+           if(is_fault){
+           }
 
            {
 
@@ -1416,7 +1433,20 @@ print("start lua state")
 
 
            {
-               controller.cmd_vel(recv_cmd_vel_msg.linear.x,recv_cmd_vel_msg.angular.z);
+               {
+                   float vel = std::sqrt(recv_cmd_vel_msg.linear.x*recv_cmd_vel_msg.linear.x + recv_cmd_vel_msg.linear.y*recv_cmd_vel_msg.linear.y);
+
+                   if (std::abs(vel) < 0.001){
+                       controller.cmd_vel(0.0,recv_cmd_vel_msg.angular.z);
+                   }else{
+                       float vel_angle = std::atan2(recv_cmd_vel_msg.linear.y, recv_cmd_vel_msg.linear.x);
+                       controller.cmd_vel(vel,recv_cmd_vel_msg.angular.z,vel_angle);
+                   }
+               }
+
+//               controller.cmd_vel(recv_cmd_vel_msg.linear.x,recv_cmd_vel_msg.angular.z);
+
+
 
 
 //               controller.m_steer_wheel[0].actual_rot_angle = SteerStateArray[0].rot_angle;
