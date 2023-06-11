@@ -456,6 +456,8 @@ namespace control {
         constrain_angle = std::atan2(m_steer_wheel[1].mount_position_y - m_steer_wheel[0].mount_position_y,
                                      m_steer_wheel[1].mount_position_x - m_steer_wheel[0].mount_position_x);
 
+        constrain_angle = std::abs(constrain_angle) < M_PI_2f32 ? constrain_angle : constrain_angle + (constrain_angle > 0.0f ? -M_PIf32 : M_PIf32  );
+
     }
 
     void
@@ -500,11 +502,21 @@ namespace control {
         float base_vel_y = 0.0;
         float base_vel_yaw = 0.0;
 
+        if(odom_flag == 0){
+
+            time = common::FromUnixNow();
+
+            position.set(0.0,0.0,0.0);
+            odom_flag ++;
+            return;
+        }
+
         if(!is_command_move){
             // not move
             actual_forward_vel = 0.0;
             actual_forward_angle = 0.0;
             actual_rotate_vel = 0.0;
+            time = common::FromUnixNow();
             PLOGD << "position:\n" << position;
             return;
         }
@@ -576,18 +588,11 @@ namespace control {
         {
             // simulate movement
 
-            if(odom_flag == 0){
 
-                time = common::FromUnixNow();
-
-                position.set(0.0,0.0,0.0);
-                odom_flag ++;
-                return;
-            }
 
             common::Time  now =  common::FromUnixNow();
 
-            float update_s = common::ToMicroSeconds(now - time) * 1e-6;
+            float update_s = common::ToMicroSeconds(now - time) * 1e-6f;
             time = now;
             float update_step = 1e-3f;
 
