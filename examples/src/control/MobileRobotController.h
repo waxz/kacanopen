@@ -30,7 +30,9 @@ namespace control {
         // mount position, and rot angle
         float mount_position_x = 0.0;
         float mount_position_y = 0.0;
-        float mount_position_yaw = 0.0;
+
+        void config();
+
 
 //        transform::Transform2d position;
 
@@ -87,12 +89,9 @@ namespace control {
         /// \param rot_angle  : sensor feedback angle
         /// \return
         bool updateState(float forward_vel, float rot_angle) {
-            float forward_vel_change = std::abs(forward_vel - actual_forward_vel);
-            float rotate_angle_change = std::abs(actual_rot_angle - mount_position_yaw + enable_rot * rot_angle);
-
-
             actual_forward_vel = forward_vel;
-            actual_rot_angle = mount_position_yaw + enable_rot * rot_angle;
+            actual_rot_angle = rot_angle;
+            actual_rot_angle = angle_normalise_zero(actual_rot_angle);
             return enable_rot;
         }
 
@@ -101,7 +100,7 @@ namespace control {
         /// \param rot_angle
         void createCommand(float forward_vel, float rot_angle) {
             command_forward_vel = forward_vel;
-            command_rotate_angle = rot_angle - mount_position_yaw;
+            command_rotate_angle = rot_angle ;
             command_rotate_angle = std::min(std::max(command_rotate_angle, min_rot_angle), max_rot_angle);
             command_forward_vel = std::min(std::max(command_forward_vel, -max_forward_vel), max_forward_vel);
         }

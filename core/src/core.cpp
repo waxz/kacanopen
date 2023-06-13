@@ -186,7 +186,7 @@ void Core::recv_message(std::vector<Message>& msg_buffer, int channel, int max_n
     }
     CAN_Dev * can_dev =static_cast<CAN_Dev *>(m_handle) ;
 
-    if(channel < 0 || channel >= can_dev->nMaxChannel-1){
+    if(channel < 0 || channel >= can_dev->nMaxChannel){
         std::cerr << "recv message, but can diver channel is wrong " << channel  << ", nMaxChannel : " << can_dev->nMaxChannel << std::endl;
         return;
     }
@@ -239,6 +239,7 @@ void Core::received_message(const Message& message) {
 
 		case 1: {
 			DEBUG_LOG("Sync or Emergency");
+            nmt.process_incoming_emcy_message(message);
 			DEBUG(message.print();)
 			break;
 		}

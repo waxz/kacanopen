@@ -36,6 +36,7 @@
 #include <iostream>
 #include <bitset>
 #include <fstream>
+#include <deque>
 
 #include "lyra/lyra.hpp"
 
@@ -113,8 +114,80 @@ void to_common(const kaco::Message& data,BitArray& target){
 }
 
 
+struct AngleStamped{
+    common::Time time = common::FromUnixNow();
+    float angle = 0;
+};
+
+template<typename T>
+struct ValueStamped{
+
+    common::Time time = common::FromUnixNow();
+    T value ;
+};
+
+
+template<typename T>
+struct ValueStampedBuffer{
+    std::deque<ValueStamped<float>> buffer;
+    void add(float value){
+
+        buffer.push_back(ValueStamped<float>{common::FromUnixNow(), value});
+
+        if(buffer.size() > 2000){
+            buffer.erase(buffer.begin(),buffer.begin() + 1000);
+        }
+    }
+    bool empty(){
+        return buffer.empty();
+    }
+
+    size_t size(){
+        return buffer.size();
+    }
+    bool query(const common::Time& time, T & value){
+
+
+        if(time == buffer.back().time){
+
+            value = buffer.back().value;
+            return true;
+        }
+
+        // first v > t
+        auto low_it = std::lower_bound(buffer.begin(),buffer.end(), time, [](auto & v, auto& t){
+            return v.time < t;
+        });
+
+        // first v < t
+        auto up_it = std::lower_bound(buffer.begin(),buffer.end(), time, [](auto & v, auto& t){
+            return v.time > t;
+        });
+
+
+        if(low_it != buffer.end() && up_it != buffer.end()){
+
+           auto s1 =  low_it->time - up_it->time;
+            auto s2 =  time - up_it->time;
+
+            value = up_it->value + (up_it->value - low_it->value)*s2/s1;
+
+            return true;
+        }else{
+            return false;
+        }
+
+        return false;
+    }
+    ValueStamped<float>& back(){
+        return buffer.back();
+    }
+
+};
 struct ControllerConfig{
 
+    bool use_rot_angle_abs = false;
+    bool is_rot_angle_calib = false;
     // angle1 = feedback1 * rot_angle_k + rot_angle_b
     float rot_angle_k = 1.0;
     float rot_angle_b = 0.0;
@@ -128,10 +201,83 @@ struct ControllerConfig{
     float forward_speed_k = 1.0;
     float mount_x = 0.0;
     float mount_y = 0.0;
-    float mount_yaw = 0.0;
     float forward_acc = 0.8;
     float rotate_vel = 0.5;
 
+    float actual_rot_angle = 0.0;
+    float actual_forward_vel = 0.0;
+    float actual_rot_abs_angle = 0.0;
+
+    ValueStampedBuffer<float> angle_buffer;
+    ValueStampedBuffer<float> angle_abs_buffer;
+
+    common::Time forward_time;
+    common::Time rotate_time;
+
+    
+    
+
+    void addAngle(float angle){
+
+        actual_rot_angle = angle;
+        if(use_rot_angle_abs){
+            angle_buffer.add( angle );
+        }else{
+            rot_angle_abs_offset = 0.0;
+            is_rot_angle_calib = true;
+            actual_rot_abs_angle = actual_rot_angle;
+        }
+
+
+    }
+    void addAngleAbs(float angle){
+
+        if(use_rot_angle_abs){
+            actual_rot_abs_angle = angle;
+            angle_abs_buffer.add( angle );
+        }else{
+//            is_rot_angle_calib = true;
+        }
+
+    }
+    bool isAngleCalib(){
+
+        return is_rot_angle_calib;
+    }
+
+    float getActualRotateAngle(){
+        if(use_rot_angle_abs){
+            angleCalib();
+            return actual_rot_angle + rot_angle_abs_offset;
+        }else{
+            return actual_rot_angle;
+        }
+    }
+    bool angleCalib(){
+
+        if(!use_rot_angle_abs){
+            is_rot_angle_calib = true;
+            return true;
+        }
+        is_rot_angle_calib = !use_rot_angle_abs;
+        if(angle_abs_buffer.size() < 10 || angle_buffer.size() < 10 ){
+            return false;
+        }
+
+        common::Time check_point = angle_abs_buffer.back().time > angle_buffer.back().time ? angle_buffer.back().time : angle_abs_buffer.back().time;
+
+        float angle, angle_abs;
+        bool ok1 = angle_buffer.query(check_point,angle);
+        bool ok2 = angle_abs_buffer.query(check_point,angle_abs);
+
+        is_rot_angle_calib = ok1 && ok2;
+        if(is_rot_angle_calib){
+
+            rot_angle_abs_offset = angle_abs - angle;
+        }
+
+        return is_rot_angle_calib;
+    }
 
 };
 struct ControllerState{
@@ -190,13 +336,12 @@ struct ControllerState{
 constexpr auto ControllerConfig_properties = std::make_tuple(
         common::property(&ControllerConfig::rot_angle_k, "rot_angle_k"),
         common::property(&ControllerConfig::rot_angle_b, "rot_angle_b"),
-        common::property(&ControllerConfig::rot_angle_b, "rot_angle_b"),
-        common::property(&ControllerConfig::rot_angle_b, "rot_angle_b"),
-        common::property(&ControllerConfig::rot_angle_b, "rot_angle_b"),
+        common::property(&ControllerConfig::rot_angle_abs_k, "rot_angle_abs_k"),
+        common::property(&ControllerConfig::rot_angle_abs_b, "rot_angle_abs_b"),
+        common::property(&ControllerConfig::use_rot_angle_abs, "use_rot_angle_abs"),
         common::property(&ControllerConfig::forward_speed_k, "forward_speed_k"),
         common::property(&ControllerConfig::mount_x, "mount_x"),
-        common::property(&ControllerConfig::mount_y, "mount_y"),
-        common::property(&ControllerConfig::mount_yaw, "mount_yaw")
+        common::property(&ControllerConfig::mount_y, "mount_y")
 );
 void to_json(nlohmann::json& j, const ControllerConfig& object)
 {
@@ -275,6 +420,969 @@ struct Controller{
     ControllerConfig config;
 };
 
+
+int test_tec(int argc, char** argv) {
+
+
+    std::atomic_bool program_run(true);
+    auto my_handler = common::fnptr<void(int)>([&](int sig){ std::cout << "get sig " << sig;program_run = false;});
+    common::set_signal_handler(my_handler);
+
+    plog::RollingFileAppender<plog::CsvFormatter> fileAppender("tec.csv", 8000000, 20); // Create the 1st appender.
+    plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender; // Create the 2nd appender.
+    plog::init(plog::debug, &fileAppender).addAppender(&consoleAppender); // Initialize the logger with the both appenders.
+
+
+
+    std::string exe_name;
+    bool get_help = false;
+    bool use_sim = false;
+    bool smooth_stop = true;
+    bool enable_control = false;
+
+
+    bool enable_fix_command = false;
+    std::vector<float> command_array;
+
+    int cmd_vel_timeout_ms = 100;
+    int feedback_timeout_ms = 100;
+    int initialise_wait_s = 1;
+
+    std::vector<std::string> command;
+    std::vector<std::string> extra_command;
+
+
+    std::string mqtt_server = "192.168.1.101";
+    std::string mqtt_pub_topic = "hello_robot";
+    std::string mqtt_sub_topic = "hello_lua";
+    std::string config_file;
+
+
+    float forward_vel_acc = 0.8;
+    float rotate_angle_vel = 0.8;
+
+    bool use_rot_angle_abs = false;
+
+    auto cli
+            =  lyra::exe_name(exe_name)
+               | lyra::help(get_help)
+               | lyra::opt( config_file, "config_file" )["-c"]["--config_file"]("config_file")
+               | lyra::opt( enable_control)["-e"]["--enable_control"]("enable_control")
+               | lyra::opt(smooth_stop,"smooth_stop")["-s"]["--smooth_stop"]("smooth_stop")
+//               | lyra::opt(use_rot_angle_abs,"use_rot_angle_abs")["-a"]["--abs_rot"]("use_rot_angle_abs")
+               | lyra::opt(cmd_vel_timeout_ms,"cmd_vel_timeout_ms")["-t"]["--cmdvel_timeout"]("cmd_vel_timeout_ms")
+               | lyra::opt(feedback_timeout_ms,"feedback_timeout_ms")["-f"]["--feedback_timeout"]("feedback_timeout_ms")
+               | lyra::opt(initialise_wait_s,"initialise_wait_s")["-i"]["--initialise_wait_s"]("initialise_wait_s")
+                 | lyra::opt(mqtt_server,"mqtt_server")["-M"]["--mqtt_server"]("mqtt_server")
+
+                 //---
+                 | lyra::group().sequential()
+                 | lyra::opt(enable_fix_command, "ON|OFF")["--command"]
+                 | lyra::arg(command_array, "command_array")
+                 //---
+               | lyra::arg(command, "command")("The command, and arguments, to attempt to run.")
+               ;
+
+
+    auto result = cli.parse( { argc, argv } );
+    if(get_help){
+        std::cout << cli << std::endl;
+        return 0;
+
+    }
+
+
+    if ( !result )
+    {
+        std::cerr << "Error in command line: " << result.message() << std::endl;
+        return 0;
+    }
+
+    if(config_file.empty()){
+        std::cout << "config_file not set" << std::endl;
+        return 0;
+
+    }
+
+
+
+    PLOGD << "enable_fix_command: " << enable_fix_command;
+
+
+    if(enable_fix_command &&command_array.size() !=4 ){
+        std::cout << " enable_fix_command , command_array.size() = " << command_array.size() << std::endl;
+        return 0;
+
+    }
+
+    const int CONTROLLER_NUM = 2;
+
+    std::vector<ControllerConfig> SteerConfigArray;
+    std::vector<ControllerState >SteerStateArray;
+
+
+    if(!config_file.empty()){
+
+        std::ifstream ifs(config_file.c_str());
+        if(ifs.is_open()){
+
+            try{
+                nlohmann::json jf = nlohmann::json::parse(ifs);
+
+                std::cout << "config_file: " << config_file<< "\n jf :\n" << jf << std::endl;
+
+                SteerConfigArray = jf;
+            }catch(nlohmann::detail::parse_error & e) {
+
+                std::cout << e.what() << std::endl;
+                std::cout << "json format error in config_file: " << config_file<<  std::endl;
+
+                return 0;
+
+            }
+
+
+        }else{
+            std::cout << "config_file not exist" << std::endl;
+            return 0;
+
+        }
+        if(SteerConfigArray.size() != CONTROLLER_NUM){
+            std::cout << "config_file error: SteerConfigArray.size() = " << SteerConfigArray.size() << std::endl;
+            return 0;
+        }
+
+        SteerStateArray.resize(SteerConfigArray.size());
+
+        for(int i = 0 ; i < CONTROLLER_NUM;i++){
+//            SteerConfigArray[i].use_rot_angle_abs = use_rot_angle_abs;
+            SteerStateArray[i].config = SteerConfigArray[i];
+        }
+    }
+
+
+    extra_command.emplace_back(exe_name);
+    std::copy(command.begin(), command.end(), std::back_inserter(extra_command));
+
+
+    int ARGC = extra_command.size();
+    const char *  ARGS[50];
+    for(int i = 0 ; i <ARGC;i++ ){
+        ARGS[i] = extra_command[i].data();
+    }
+
+    const char** ARGS1 = const_cast<const char **>(ARGS);
+
+
+    //mqtt
+    std::cout << "run lua" << std::endl;
+    lua_State* L = luaL_newstate();
+    sol::state_view lua(L);
+    lua.open_libraries(sol::lib::base, sol::lib::package,sol::lib::os, sol::lib::table, sol::lib::jit,sol::lib::coroutine);
+
+
+
+    auto simple_handler_lambda =
+            [](lua_State*, const sol::protected_function_result& result) {
+                // You can just pass it through to let the
+                // call-site handle it
+                std::cout << "\n******LUA INFO:\nAn exception occurred in a function, here's what it says ";
+                sol::error err = result;
+                std::cout << "call failed, sol::error::what() is " <<  err.what() << std::endl;
+//                MLOGW("%s", what.c_str());
+                return result;
+            };
+    lua.set_function("move_command",[&](float forward_vel_1, float  rotate_angle_1, float forward_vel_2, float  rotate_angle_2){
+
+        command_array.resize(4);
+        command_array[0] = forward_vel_1;
+        command_array[1] = rotate_angle_1;
+        command_array[2] = forward_vel_2;
+        command_array[3] = rotate_angle_2;
+
+        command_array[1] = std::max(std::min(1.918888889f, command_array[1]),-1.918888889f);
+        command_array[3] = std::max(std::min(1.918888889f, command_array[3]),-1.918888889f);
+
+    });
+
+
+    std::string mqtt_server_str = absl::StrFormat("server:%s", mqtt_server.c_str());
+
+    PLOGD << "mqtt_server_str: " << mqtt_server_str;
+
+//    char* mqtt_config_str[] = {"server:broker-cn.emqx.io", "port:1883","keep_alive:30","clean_session:1"};
+//    char* mqtt_config_str[] = {"server:172.30.254.199", "port:1883","keep_alive:30","clean_session:1"};
+    const char* mqtt_config_str[] = {mqtt_server_str.c_str(), "port:1883","keep_alive:30","clean_session:1"};
+
+    message::MqttMessageManager mqttMessageManager;
+    char* mqtt_client_id = "cpp_test";
+    mqttMessageManager.open(mqtt_client_id,4, mqtt_config_str);
+//    char topic_arg[100];
+    std::string mqtt_pub_topic_arg = absl::StrFormat("PUB:%s:0", mqtt_pub_topic.c_str());
+    std::string mqtt_sub_topic_arg = absl::StrFormat("SUB:%s:0", mqtt_sub_topic.c_str());
+
+    mqttMessageManager.add_channel<std::string>(mqtt_pub_topic_arg.c_str());
+
+    mqttMessageManager.add_channel<std::string>(mqtt_sub_topic_arg.c_str());
+
+
+
+    std::string decode_str;
+    auto lua_cb =[&](void* data){
+        std::string* data_ptr = static_cast<std::string*>(data);
+        std::cout << "test123 recv msg: " << *data_ptr << std::endl;
+        bool decode_ok =  absl::Base64Unescape(*data_ptr,&decode_str);
+        std::cout << "test123 recv decode_str: " << decode_str << std::endl;
+
+        if(decode_ok){
+
+            auto result = lua.script(
+                    decode_str,
+                    simple_handler_lambda);
+            if (result.valid()) {
+                std::cout << "run lua script ok"
+                          << std::endl;
+            }
+            else {
+                std::cout << "run lua script fail"
+                          << std::endl;
+            }
+
+
+
+        }
+    };
+
+    mqttMessageManager.start("");
+
+    std::cout << "mqtt start done" << std::endl;
+
+    const int STATUS_NUM = 11;
+    const int FRAME_NUM = 60;
+
+    common::Time record_start_time = common::FromUnixNow();
+    int mqtt_msg_status_cnt = 0;
+    std::vector<float> mqtt_msg_status(STATUS_NUM*FRAME_NUM);
+    std::vector<int16_t> mqtt_msg_status_int(STATUS_NUM*FRAME_NUM);
+
+    std::string mqtt_binary_str;
+    std::string mqtt_base64_str;
+
+
+    //mqtt
+
+    //ros
+
+
+    message::RosMessageManager rosMessageManager;
+
+    rosMessageManager.open("driver_comm", ARGC, ARGS1 );
+
+
+    rosMessageManager.add_channel<common_message::Twist>("SUB:control_cmd_vel:10");
+    rosMessageManager.add_channel<common_message::Odometry>("PUB:odom:200");
+
+    std::vector<common_message::Twist> cmd_vel_msgs(10);
+    common_message::Odometry odom;
+    odom.twist.twist.linear.z = 0.0f;
+
+    odom.twist.twist.angular.x = 0.0f;
+    odom.twist.twist.angular.y = 0.0f;
+
+    odom.header.frame_id.assign("odom");
+    odom.child_frame_id.assign("base_link");
+
+    odom.pose.covariance[0] = 0.1;
+    odom.pose.covariance[7] = 0.1;
+    odom.pose.covariance[14] = 0.1;
+    odom.pose.covariance[21] = 0.1;
+    odom.pose.covariance[28] = 0.1;
+
+    odom.pose.covariance[35] = 0.1;
+    odom.twist.covariance[0] = 0.1;
+    odom.twist.covariance[7] = 0.1;
+
+    odom.twist.covariance[14] = 0.1;
+    odom.twist.covariance[21] = 0.1;
+    odom.twist.covariance[28] = 0.1;
+
+    odom.twist.covariance[35] = 0.1;
+
+
+    // todo: callback may fail if topic and datetye not matched
+    bool recv_new_cmd_vel = false;
+    common_message::Twist recv_cmd_vel_msg;
+    common::Time  recv_cmd_vel_time = common::FromUnixNow();
+    auto cmd_vel_sub_cb =[&recv_new_cmd_vel,&recv_cmd_vel_msg,&recv_cmd_vel_time](void* data){
+        common_message::Twist * data_ptr = static_cast<common_message::Twist*>(data);
+        recv_cmd_vel_msg = * data_ptr;
+//        std::cout << "odom_sub_cb recv msg: " << data_ptr->linear.x << ", " << data_ptr->angular.z << std::endl;
+        recv_cmd_vel_time = common::FromUnixNow();
+        recv_new_cmd_vel = true;
+    };
+
+
+    //ros
+
+
+
+
+
+
+
+
+    /*
+
+     device list
+     1. forward_1
+     2. rotate_1
+     3. forward_2
+     4. rotate_2
+
+
+
+    */
+
+    // Set the name of your CAN bus. "slcan0" is a common bus name
+    // for the first SocketCAN device on a Linux system.
+    const std::string busname = "USBCAN-II";
+
+    // Set the baudrate of your CAN bus. Most drivers support the values
+    // "1M", "500K", "125K", "100K", "50K", "20K", "10K" and "5K".
+    const std::string baudrate = "500K:500K";
+
+    // -------------- //
+    // Initialization //
+    // -------------- //
+
+    common::TaskManager taskManager;
+
+    std::cout << "This is an example which shows the usage of the Core library." << std::endl;
+
+    // Create core.
+    kaco::Core device;
+
+
+    const int MAX_MESSAGE_SIZE = 1000;
+    std::vector<kaco::Message> message_buffer(MAX_MESSAGE_SIZE);
+
+
+    auto send_to_channel_1 = [&](const auto& msg){
+        device.send(msg,0);
+        return 1;
+    };
+    auto send_to_channel_2 = [&](const auto& msg){
+        device.send(msg,1);
+        return 1;
+    };
+
+    // nmt
+    // 1,2,3,4,5,6
+    const size_t DEVICE_NUM = 6;
+    std::vector<kaco::NMT::NodeState> device_node_state_array(DEVICE_NUM + 1);
+    std::vector<std::bitset<16>> device_node_emcy_array(DEVICE_NUM + 1);
+
+    std::vector<kaco::Message> forward_driver_initializer_msg(4);
+    std::vector<kaco::Message> rotate_driver_initializer_msg(4);
+
+    std::vector<kaco::Message> forward_driver_disable_msg(1);
+    std::vector<kaco::Message> rotate_driver_disable_msg(1);
+
+    std::vector<kaco::Message> driver_command_msg_channel_1(2);
+    std::vector<kaco::Message> driver_command_msg_channel_2(2);
+
+    forward_driver_disable_msg[0] = kaco::Message{0x200,false,false,8,{0x06,0x00,0x03,0,0,0,0,0}};
+    rotate_driver_disable_msg[0] = kaco::Message{0x200,false,false,8,{0x06,0x00,0x08,0,0,0,0,0}};
+
+    forward_driver_initializer_msg[0] = kaco::Message{0x00,false,false,2,{0x01,0x00,0x00,0,0,0,0,0}};
+    forward_driver_initializer_msg[1] = kaco::Message{0x200,false,false,8,{0x06,0x00,0x03,0,0,0,0,0}};
+    forward_driver_initializer_msg[2] = kaco::Message{0x200,false,false,8,{0x07,0x00,0x03,0,0,0,0,0}};
+    forward_driver_initializer_msg[3] = kaco::Message{0x200,false,false,8,{0x0f,0x00,0x03,0,0,0,0,0}};
+
+    rotate_driver_initializer_msg[0] = kaco::Message{0x00,false,false,2,{0x01,0x00,0x00,0,0,0,0,0}};
+    rotate_driver_initializer_msg[1] = kaco::Message{0x200,false,false,8,{0x06,0x00,0x08,0,0,0,0,0}};
+    rotate_driver_initializer_msg[2] = kaco::Message{0x200,false,false,8,{0x07,0x00,0x08,0,0,0,0,0}};
+    rotate_driver_initializer_msg[3] = kaco::Message{0x200,false,false,8,{0x0f,0x00,0x08,0,0,0,0,0}};
+
+    driver_command_msg_channel_1[0] =kaco::Message{0x301,false,false,8,{0x00,0x00,0x00,0,0,0,0,0}};
+    driver_command_msg_channel_1[1] =kaco::Message{0x302,false,false,8,{0x00,0x00,0x00,0,0,0,0,0}};
+    driver_command_msg_channel_2[0] =kaco::Message{0x304,false,false,8,{0x00,0x00,0x00,0,0,0,0,0}};
+    driver_command_msg_channel_2[1] =kaco::Message{0x305,false,false,8,{0x00,0x00,0x00,0,0,0,0,0}};
+
+    auto initialise_forward_driver = [&](size_t driver_id){
+        PLOGD << "initialise_forward_driver: " << driver_id;
+
+        forward_driver_initializer_msg[0].data[1] = driver_id;
+
+        for(size_t i = 1; i < forward_driver_initializer_msg.size();i++){
+
+            forward_driver_initializer_msg[i].cob_id = 0x200 + driver_id;
+        }
+        int channel = (driver_id <= 2) ? 0 : 1;
+        device.send(forward_driver_initializer_msg.data(),forward_driver_initializer_msg.size(),channel);
+    };
+
+    auto initialise_rotate_driver = [&](size_t driver_id){
+
+        PLOGD << "initialise_rotate_driver: " << driver_id;
+        rotate_driver_initializer_msg[0].data[1] = driver_id;
+
+        for(size_t i = 1; i < rotate_driver_initializer_msg.size();i++){
+
+            rotate_driver_initializer_msg[i].cob_id = 0x200 + driver_id;
+        }
+        int channel = (driver_id <= 2) ? 0 : 1;
+        device.send(rotate_driver_initializer_msg.data(),rotate_driver_initializer_msg.size(),channel);
+    };
+
+    auto disable_forward_driver = [&](size_t driver_id){
+        for(auto& m:forward_driver_disable_msg){
+            m.cob_id = 0x200 + driver_id;
+        }
+        int channel = (driver_id <= 2) ? 0 : 1;
+        device.send(forward_driver_disable_msg.data(),forward_driver_disable_msg.size(),channel);
+
+    };
+
+    auto disable_rotate_driver = [&](size_t driver_id){
+        for(auto& m:rotate_driver_disable_msg){
+            m.cob_id = 0x200 + driver_id;
+        }
+        int channel = (driver_id <= 2) ? 0 : 1;
+        device.send(rotate_driver_disable_msg.data(),rotate_driver_disable_msg.size(),channel);
+
+    };
+
+    bool is_all_alive = false;
+    bool is_all_initialised = false;
+    bool is_all_initialise_triggered = false;
+    bool is_rot_sensor_ready = false;
+
+    bool is_all_operational = false;
+    bool is_any_fault = false;
+
+    auto node_heartbeat_cb = [&](const kaco::Message& message, const kaco::NMT::NodeState & state){
+
+        PLOGD << "node_heartbeat : " << int(message.get_node_id()) << ", state: " << int(state);
+        if(message.get_node_id() > 0 && message.get_node_id() <= DEVICE_NUM){
+            device_node_state_array[message.get_node_id()] = state;
+        }
+    };
+
+    auto node_emcy_cb = [&](const kaco::Message& message){
+        if(message.get_node_id() > 0 && message.get_node_id() <= DEVICE_NUM){
+            device_node_emcy_array[message.get_node_id()] =  * (u_int64_t *)(&message.data[3]);
+        }
+    };
+
+    auto check_all_state = [&](){
+
+        is_all_alive = true;
+        std::array<size_t, 4> driver_id_vec{1,2,4,5};
+        for(auto i : driver_id_vec){
+            is_all_alive = is_all_alive &&  (device_node_state_array[i] == kaco::NMT::NodeState::Pre_operational || device_node_state_array[i] == kaco::NMT::NodeState::Operational );
+        }
+        is_any_fault = false;
+        for(auto i : driver_id_vec)   {
+            is_any_fault = is_any_fault || (device_node_emcy_array[i] != 0 );
+        }
+    };
+    device.nmt.register_device_alive_callback(node_heartbeat_cb);
+
+    device.nmt.register_device_emcy_callback(node_emcy_cb);
+
+    std::vector<kaco::Message> send_message_array(6);
+
+    auto control_wheel = [&](bool enable, float forward_vel_1, float rotate_angle_1, float forward_vel_2, float rotate_angle_2){
+
+
+        if(!enable_control){
+            PLOGD << "enable_control is not set";
+            return ;
+        }
+        if(!is_all_alive || !is_all_initialised){
+            PLOGD << "not is_all_alive or not is_all_initialised";
+            return;
+        }
+
+
+        PLOGD <<"control_wheel 1:[forward_vel, rotate_angle]: " << forward_vel_1 << ", " << rotate_angle_1;
+        PLOGD <<"control_wheel 2:[forward_vel, rotate_angle]: " << forward_vel_2 << ", " << rotate_angle_2;
+
+        if(enable){
+
+
+            *(int*)(&driver_command_msg_channel_1[0].data[0]) = forward_vel_1 / SteerConfigArray[0].forward_speed_k;
+            *(int*)(&driver_command_msg_channel_1[1].data[0]) = (rotate_angle_1 - SteerConfigArray[0].rot_angle_b + SteerConfigArray[0].rot_angle_abs_offset)/SteerConfigArray[0].rot_angle_k + SteerConfigArray[0].rot_angle_abs_offset;
+
+            *(int*)(&driver_command_msg_channel_2[0].data[0]) = forward_vel_2 / SteerConfigArray[1].forward_speed_k;
+            *(int*)(&driver_command_msg_channel_2[1].data[0]) = (rotate_angle_2 - SteerConfigArray[1].rot_angle_b + SteerConfigArray[1].rot_angle_abs_offset)/SteerConfigArray[1].rot_angle_k + SteerConfigArray[1].rot_angle_abs_offset;
+
+            PLOGD << "send can data to channel 1";
+            driver_command_msg_channel_1[0].print();
+            driver_command_msg_channel_1[1].print();
+
+
+            PLOGD << "send can data to channel 2";
+            driver_command_msg_channel_2[0].print();
+            driver_command_msg_channel_2[1].print();
+
+            device.send(driver_command_msg_channel_1.data(),driver_command_msg_channel_1.size(),0);
+            device.send(driver_command_msg_channel_2.data(),driver_command_msg_channel_2.size(),1);
+
+        }else{
+
+            *(int*)(&driver_command_msg_channel_1[0].data[0]) = 0;
+            *(int*)(&driver_command_msg_channel_1[1].data[0]) = 0;
+
+            *(int*)(&driver_command_msg_channel_2[0].data[0]) = 0;
+            *(int*)(&driver_command_msg_channel_2[1].data[0]) = 0;
+            device.send(driver_command_msg_channel_1.data(),driver_command_msg_channel_1.size(),0);
+            device.send(driver_command_msg_channel_2.data(),driver_command_msg_channel_2.size(),1);
+
+
+            disable_forward_driver(1);
+            disable_rotate_driver(2);
+
+            disable_forward_driver(4);
+            disable_rotate_driver(5);
+
+        }
+
+    };
+
+    auto update_wheel_forward = [&](size_t driver_id, const kaco::Message& message){
+
+        PLOGD << "receive [" << driver_id << "]";
+
+        int num = * (int*)(&message.data[0]);
+
+        std::bitset<16> fault_code = * (int*)(&message.data[4]);
+
+        SteerConfigArray[driver_id].actual_forward_vel = num * SteerConfigArray[driver_id].forward_speed_k;
+
+        PLOGD << "actual_forward_vel: " << SteerConfigArray[driver_id].actual_forward_vel;
+    };
+
+    auto update_wheel_rotate = [&](size_t driver_id, const kaco::Message& message){
+        PLOGD << "receive [" << driver_id << "]";
+        int num = * (int*)(&message.data[0]);
+
+        std::bitset<16> fault_code = * (int*)(&message.data[4]);
+
+        float rot_angle = num * SteerConfigArray[driver_id].rot_angle_k +  SteerConfigArray[driver_id].rot_angle_b;
+
+        SteerConfigArray[driver_id].addAngle(rot_angle);
+        PLOGD << "actual_rot_angle: " << rot_angle;
+
+    };
+    auto update_wheel_rotate_abs = [&](size_t driver_id, const kaco::Message& message){
+        PLOGD << "receive [" << driver_id << "]";
+
+        int num = * (int*)(&message.data[0]);
+
+        float rot_abs_angle = num * SteerConfigArray[driver_id].rot_angle_abs_k +  SteerConfigArray[driver_id].rot_angle_abs_b;
+
+        SteerConfigArray[driver_id].addAngleAbs(rot_abs_angle);
+        PLOGD <<  "actual_rot_abs_angle: " << rot_abs_angle;
+
+
+    };
+
+    auto update_wheel_rotate_abs_calib = [&](size_t driver_id){
+
+        SteerConfigArray[driver_id].angleCalib();
+    };
+
+
+
+    // motor
+    // wheel 1: forward 1, rotate 2
+    // wheel 2: forward 4, rotate 5
+
+    // absolute encoder
+    //
+    // node id 3, 6
+
+
+
+
+    for(u_int8_t i = 0 ; i < 2; i++){
+        uint8_t forward_driver_id = 3*i + 1;
+        uint8_t rotate_driver_id = 3*i + 2;
+        uint8_t encoder_id = 3*i + 3;
+
+
+        device.pdo.add_pdo_received_callback(0x180 + forward_driver_id, [i,&update_wheel_forward](const kaco::Message& message){
+
+            std::cout << "forward : " << int(message.get_node_id())  <<std::endl;
+            message.print();
+            update_wheel_forward(i,message);
+
+        });
+
+        device.pdo.add_pdo_received_callback(0x180 + rotate_driver_id, [i,&update_wheel_rotate](const kaco::Message& message){
+            std::cout << "rotate : " << int(message.get_node_id())  <<std::endl;
+            message.print();
+            update_wheel_rotate(i,message);
+        });
+
+        device.pdo.add_pdo_received_callback(0x180 + encoder_id, [i,&update_wheel_rotate_abs](const kaco::Message& message){
+
+            std::cout << "encoder : " << int(message.get_node_id())  <<std::endl;
+            message.print();
+            update_wheel_rotate_abs(i,message);
+        });
+
+    }
+
+    // controller
+    control::DoubleSteerController controller;
+
+
+    //
+    control::SteerWheelBase wheel_1;
+    wheel_1.enable_rot = true;
+    wheel_1.mount_position_x = SteerConfigArray[0].mount_x;
+    wheel_1.mount_position_y = SteerConfigArray[0].mount_y;
+
+    wheel_1.max_forward_acc = forward_vel_acc;
+    wheel_1.max_rot_vel = rotate_angle_vel;
+
+
+    control::SteerWheelBase wheel_2;
+    wheel_2.enable_rot = true;
+    wheel_2.mount_position_x = SteerConfigArray[1].mount_x;
+    wheel_2.mount_position_y = SteerConfigArray[1].mount_y;
+
+    wheel_2.max_forward_acc = forward_vel_acc;
+    wheel_2.max_rot_vel = rotate_angle_vel;
+
+    controller.set_wheel(wheel_1,wheel_2);
+
+    controller.smooth_stop = smooth_stop;
+
+
+
+
+    if(!use_sim){
+        if (!device.start(busname, baudrate)) {
+            std::cout << "Starting device failed." << std::endl;
+            return EXIT_FAILURE;
+        }
+
+        taskManager.addTask([&]{
+
+            check_all_state();
+            // if not operational, send nmt start
+            if(!is_all_alive){
+                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_1);
+                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_2);
+            }
+            device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_1);
+            device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_2);
+
+            if(is_any_fault){
+
+            }
+
+            return true;
+        },500*1000,0);
+
+        taskManager.addTask([&]{
+            device.nmt.send_sync_message(send_to_channel_1);
+            device.nmt.send_sync_message(send_to_channel_2);
+            device.recv_message(message_buffer,0, message_buffer.size());
+            device.recv_message(message_buffer,1, message_buffer.size());
+            return true;
+        },10*1000,0);
+
+
+        // initializer
+        taskManager.addTask([&]{
+
+            if(is_all_alive){
+
+
+                if(!is_all_initialise_triggered){
+
+                    is_all_initialise_triggered = true;
+                    taskManager.addTask([&]{
+
+
+                        if(!is_all_initialised){
+                            initialise_forward_driver(1);
+                            initialise_rotate_driver(2);
+
+                            initialise_forward_driver(4);
+                            initialise_rotate_driver(5);
+
+                            taskManager.addTask([&]{
+                                is_all_initialised = true;
+                                return false;
+                            }, initialise_wait_s*1000*1000, 0);
+                        }
+                        
+                        
+
+
+                        return false;
+                        },100*1000, 0);
+
+
+                }
+
+
+            }else{
+                return true;
+            }
+
+
+            return true;
+        }, 10*1000,1);
+
+
+    }else{
+
+        is_all_alive = true;
+        is_all_initialised = true;
+        is_any_fault = false;
+
+    }
+
+    // rot
+    taskManager.addTask([&]{
+        is_rot_sensor_ready = true;
+        for(size_t i = 0 ; i < SteerConfigArray.size();i++){
+            is_rot_sensor_ready = SteerConfigArray[i].isAngleCalib();
+        }
+        return true;
+    });
+
+
+    // odom
+    taskManager.addTask([&]{
+
+        PLOGD << "is_all_alive: " << is_all_alive;
+        PLOGD << "is_rot_sensor_ready: " << is_rot_sensor_ready;
+        PLOGD << "is_all_initialised: " << is_all_initialised;
+
+
+        if(is_all_alive && is_rot_sensor_ready && is_all_initialised){
+
+
+            PLOGD << "update driver0 feedback[forward_vel, rotate_angle], " << SteerConfigArray[0].actual_forward_vel << ", " << SteerConfigArray[0].actual_rot_abs_angle;
+            PLOGD << "update driver1 feedback[forward_vel, rotate_angle], " << SteerConfigArray[1].actual_forward_vel << ", " << SteerConfigArray[1].actual_rot_abs_angle;
+
+            controller.updateState(SteerConfigArray[0].actual_forward_vel,SteerConfigArray[0].actual_rot_abs_angle, SteerConfigArray[1].actual_forward_vel,SteerConfigArray[1].actual_rot_abs_angle);
+
+
+
+            odom.header.stamp = common::FromUnixNow();
+
+
+            const transform::Transform2d& robot_pose = controller.getPosition();
+            odom.pose.pose.position.x = robot_pose.x();
+            odom.pose.pose.position.y = robot_pose.y();
+            odom.pose.pose.position.z = 0.0;
+
+            math::yaw_to_quaternion(robot_pose.yaw(), odom.pose.pose.orientation.x,odom.pose.pose.orientation.y,odom.pose.pose.orientation.z,odom.pose.pose.orientation.w );
+
+            odom.twist.twist.linear.x = controller.getActualForwardVel() * std::cos(controller.getActualForwardAngle());
+            odom.twist.twist.linear.y = controller.getActualForwardVel() * std::sin(controller.getActualForwardAngle());
+
+            odom.twist.twist.angular.z = controller.getActualRotateVel();
+
+
+
+            rosMessageManager.send_message("odom",&odom, 1, 0.1 );
+
+
+            {
+                auto now = common::FromUnixNow();
+                // mqtt
+                if(mqtt_msg_status_cnt < FRAME_NUM ){
+                    float ts = common::ToMicroSeconds(now - record_start_time) * 1e-6;
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 0 ] = ts;
+
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 1 ] = controller.m_steer_wheel[0].getCommandForwardVel();
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 2 ] = controller.m_steer_wheel[0].actual_forward_vel;
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 3 ] = controller.m_steer_wheel[0].getCommandRotateAngle();
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 4 ] = controller.m_steer_wheel[0].actual_rot_angle;
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 5 ] = controller.m_steer_wheel[0].steer_constrain_vel;
+
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 6 ] = controller.m_steer_wheel[1].getCommandForwardVel();
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 7 ] = controller.m_steer_wheel[1].actual_forward_vel;
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 8 ] = controller.m_steer_wheel[1].getCommandRotateAngle();
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 9 ] = controller.m_steer_wheel[1].actual_rot_angle;
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 10 ] = controller.m_steer_wheel[1].steer_constrain_vel;
+
+                }
+                mqtt_msg_status_cnt++;
+
+
+                if(mqtt_msg_status_cnt == FRAME_NUM){
+                    record_start_time = now;
+
+                    for(int i = 0; i <FRAME_NUM*STATUS_NUM; i++ ){
+                        mqtt_msg_status_int[i] =  int16_t (mqtt_msg_status[i]*1e4) ;
+                    }
+
+                    mqtt_binary_str.assign((char*)(&mqtt_msg_status_int[0])  , FRAME_NUM*STATUS_NUM*2 );
+
+                    mqtt_base64_str= absl::Base64Escape(mqtt_binary_str);
+
+                    mqttMessageManager.send_message(mqtt_pub_topic.c_str(), &mqtt_base64_str,1,0.1);
+
+
+                    mqtt_msg_status_cnt = 0;
+                }
+            }
+
+
+        }else{
+
+        }
+
+
+        return true;
+    }, 10*1000,1);
+
+    // cmd_vel
+    int cmd_vel_timeout_counter = 0;
+    if(!enable_fix_command){
+        PLOGD << "add cmd_vel command";
+        taskManager.addTask([&]{
+
+
+            if((is_all_alive && is_all_initialised && is_rot_sensor_ready && ! is_any_fault)){
+                rosMessageManager.recv_message("control_cmd_vel",10,0.001, cmd_vel_sub_cb);
+
+                auto now = common::FromUnixNow();
+                if( common::ToMillSeconds(now - recv_cmd_vel_time) > cmd_vel_timeout_ms){
+
+                    PLOGD << "cmd_vel timeout, cmd_vel reset";
+                    recv_cmd_vel_msg.linear.x = 0.0;
+                    recv_cmd_vel_msg.linear.y = 0.0;
+                    recv_cmd_vel_msg.angular.z = 0.0;
+                    recv_cmd_vel_time = now;
+
+                }
+                if(recv_new_cmd_vel){
+                    recv_new_cmd_vel = false;
+                    PLOGD<< "recv cmd_vel:[rotate_vel,forward_vel]: " << recv_cmd_vel_msg.angular.z << ", " << recv_cmd_vel_msg.linear.x;
+                }
+
+
+
+
+
+
+                // controller compute
+                {
+                    float vel = std::sqrt(recv_cmd_vel_msg.linear.x*recv_cmd_vel_msg.linear.x + recv_cmd_vel_msg.linear.y*recv_cmd_vel_msg.linear.y);
+
+                    if (std::abs(vel) < 0.001){
+                        controller.cmd_vel(0.0,recv_cmd_vel_msg.angular.z);
+                    }else{
+                        float vel_angle = std::atan2(recv_cmd_vel_msg.linear.y, recv_cmd_vel_msg.linear.x);
+                        controller.cmd_vel(vel,recv_cmd_vel_msg.angular.z,vel_angle);
+                    }
+                }
+
+                controller.interpolate();
+
+                PLOGD<< "get target   :[rotate_angle,forward_vel]\n" << controller.m_steer_wheel[0].target_rot_angle << ", "
+                     << controller.m_steer_wheel[0].target_forward_vel << ", "
+                     << controller.m_steer_wheel[1].target_rot_angle << ", "
+                     << controller.m_steer_wheel[1].target_forward_vel;
+
+                PLOGD << "get command:[rotate_angle,forward_vel]\n" << controller.m_steer_wheel[0].command_rotate_angle << ", "
+                      << controller.m_steer_wheel[0].command_forward_vel << ", "
+                      << controller.m_steer_wheel[1].command_rotate_angle << ", "
+                      << controller.m_steer_wheel[1].command_forward_vel;
+
+                PLOGD << "get interpolate command:[rotate_angle,forward_vel]\n" << controller.m_steer_wheel[0].getCommandRotateAngle() << ", "
+                      << controller.m_steer_wheel[0].getCommandForwardVel() << ", "
+                      << controller.m_steer_wheel[1].getCommandRotateAngle() << ", "
+                      << controller.m_steer_wheel[1].getCommandForwardVel();
+
+
+
+
+                // can send
+
+                control_wheel(true, controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle() ,controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle() );
+
+                return true;
+            }else{
+                PLOGD << "driver not ready, cmd_vel reset";
+
+                recv_cmd_vel_msg.linear.x = 0.0;
+                recv_cmd_vel_msg.linear.y = 0.0;
+                recv_cmd_vel_msg.angular.z = 0.0;
+
+
+                return true;
+
+            }
+
+
+
+            return true;
+        }, 10*1000,1);
+
+    }else{
+        PLOGD << "add fix command";
+
+        taskManager.addTask([&control_wheel,&command_array,&mqttMessageManager,&mqtt_sub_topic,&lua_cb]{
+
+            mqttMessageManager.recv_message(mqtt_sub_topic.c_str(),10,0.01, lua_cb);
+
+            command_array[1] = std::max(std::min(1.918888889f, command_array[1]),-1.918888889f);
+            command_array[3] = std::max(std::min(1.918888889f, command_array[3]),-1.918888889f);
+
+            PLOGD << "send fix command: " << command_array[0] << ", " << command_array[1] << ", " <<command_array[2] << ", " << command_array[3];
+
+            control_wheel(true, command_array[0],command_array[1],command_array[2],command_array[3] );
+
+            return true;
+        } ,100*1000,0);
+
+    }
+
+
+
+
+    // add timeout or fault callback
+    // add odom computation
+    // add cmd_vel computation
+
+    // driver initializer
+
+    PLOGD << "start loop, " << program_run;
+    while (program_run && rosMessageManager.is_running()){
+
+        taskManager.call();
+
+
+
+    }
+    PLOGD << "end loop, " << program_run;
+
+    control_wheel(false, 0.0, 0.0 , 0.0, 0.0);
+
+
+
+    mqttMessageManager.stop();
+
+    rosMessageManager.stop();
+    device.stop();
+
+
+    return 0;
+
+}
 int test_roboteq(int argc, char** argv){
 
     plog::RollingFileAppender<plog::CsvFormatter> fileAppender("roboteq.csv", 8000000, 10); // Create the 1st appender.
@@ -391,9 +1499,7 @@ print("start lua state")
 
                | lyra::opt(forward_vel_acc,"forward_vel_acc")["-F"]["--forward_vel_acc"]("forward_vel_acc")
                  | lyra::opt(rotate_angle_vel,"rotate_angle_vel")["-R"]["--rotate_angle_vel"]("rotate_angle_vel")
-                 | lyra::opt( config_file, "config_file" )
-                               ["-c"]["--config_file"]
-                                       ("config_file")
+                 | lyra::opt( config_file, "config_file" )["-c"]["--config_file"]("config_file")
                 | lyra::opt( calib_id, "calib_id" )
                                ["-i"]["--calib_id"]
                                        ("calib_id, use 0 or 1 ")
@@ -909,7 +2015,6 @@ print("start lua state")
     wheel_1.enable_rot = true;
     wheel_1.mount_position_x = SteerStateArray[0].config.mount_x;
     wheel_1.mount_position_y = SteerStateArray[0].config.mount_y;
-    wheel_1.mount_position_yaw = SteerStateArray[0].config.mount_yaw;
 
     wheel_1.max_forward_acc = forward_vel_acc;
     wheel_1.max_rot_vel = rotate_angle_vel;
@@ -919,7 +2024,6 @@ print("start lua state")
     wheel_2.enable_rot = true;
     wheel_2.mount_position_x = SteerStateArray[1].config.mount_x;
     wheel_2.mount_position_y = SteerStateArray[1].config.mount_y;
-    wheel_2.mount_position_yaw = SteerStateArray[1].config.mount_yaw;
 
     wheel_2.max_forward_acc = forward_vel_acc;
     wheel_2.max_rot_vel = rotate_angle_vel;
@@ -1678,10 +2782,7 @@ int test_linde() {
 
     });
 
-    device.nmt.register_device_alive_callback([](const kaco::Message message){
-        std::cout << "Device says it's alive! ID = " << (unsigned) message.get_node_id() << std::endl;
-        // Check if this is the node we are looking for.
-    });
+
 
 
 
@@ -1980,6 +3081,8 @@ to indicate boot-up.
 }
 
 int main(int argc, char** argv){
-    test_roboteq(argc,argv );
+//    test_roboteq(argc,argv );
+    test_tec(argc,argv);
+
     return 0;
 }

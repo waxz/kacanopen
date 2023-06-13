@@ -87,8 +87,9 @@ namespace kaco {
 		/// Type of a device alive callback function
 		/// Important: Never call register_device_alive_callback()
 		///   from within (-> deadlock)!
-		using DeviceAliveCallback = std::function< void(Message message) >;
-		
+		using DeviceAliveCallback = std::function< void(const Message& message, const NodeState& state) >;
+        using DeviceEmcyCallback = std::function< void(const Message& message) >;
+
 		/// Type of a new device callback function
 		/// \deprecated
 		using NewDeviceCallback = DeviceAliveCallback;
@@ -113,6 +114,9 @@ namespace kaco {
 		/// \param message The received CanOpen message.
 		/// \remark thread-safe
 		void process_incoming_message(const Message& message);
+
+
+        void process_incoming_emcy_message(const Message& message);
 
 		/// Sends a NMT message to a given device
 		/// \param node_id Node id of the device.
@@ -158,6 +162,8 @@ namespace kaco {
 		/// \remark thread-safe
 		void register_device_alive_callback(const DeviceAliveCallback& callback);
 
+        void register_device_emcy_callback(const DeviceEmcyCallback& callback);
+
 		/// Registers a callback which will be called when a new slave device is discovered.
 		/// \remark thread-safe
 		/// \deprecated
@@ -170,7 +176,10 @@ namespace kaco {
 
 		/// \todo rename to device_alive_callback
 		std::vector<NewDeviceCallback> m_device_alive_callbacks;
+        std::vector<DeviceEmcyCallback> m_device_emcy_callbacks;
+
 		mutable std::mutex m_device_alive_callbacks_mutex;
+        mutable std::mutex m_device_emcy_callbacks_mutex;
 
 		static const bool m_cleanup_futures = true;
 		std::forward_list<std::future<void>> m_callback_futures; // forward_list because of remove_if

@@ -21,17 +21,19 @@
 
 namespace control {
 
+    void SteerWheelBase::config() {
+    }
     void SteerWheelBase::createCommand() {
         command_forward_vel = target_forward_vel;
         command_forward_vel = std::min(std::max(command_forward_vel, -max_forward_vel), max_forward_vel);
 
 
         //target rot angle in motor frame
-        target_angle_in_motor = target_rot_angle - mount_position_yaw;
+        target_angle_in_motor = target_rot_angle ;
 
         target_angle_in_motor = angle_normalise_zero(target_angle_in_motor);
         // actual rot angle in motor frame
-        actual_angle_in_motor = actual_rot_angle - mount_position_yaw;
+        actual_angle_in_motor = actual_rot_angle ;
         actual_rot_angle = angle_normalise_zero(actual_rot_angle);
 
 
@@ -453,6 +455,10 @@ namespace control {
         m_steer_wheel[0] = wheel_1;
         m_steer_wheel[1] = wheel_2;
 
+        for(size_t i = 0 ; i < m_steer_wheel.size();i++){
+            m_steer_wheel[i].config();
+        }
+
         constrain_angle = std::atan2(m_steer_wheel[1].mount_position_y - m_steer_wheel[0].mount_position_y,
                                      m_steer_wheel[1].mount_position_x - m_steer_wheel[0].mount_position_x);
 
@@ -492,7 +498,7 @@ namespace control {
         constrain_rotate_radius_2 = m_steer_wheel[1].mount_position_x > 0.0 ? constrain_rotate_radius_2 : -constrain_rotate_radius_2;
 
 
-        bool is_command_move = std::abs(m_steer_wheel[0].actual_forward_vel) > 0.0001f || std::abs(m_steer_wheel[1].actual_forward_vel) > 0.0001f;
+        bool is_command_move = std::abs(m_steer_wheel[0].actual_forward_vel) > 0.001f || std::abs(m_steer_wheel[1].actual_forward_vel) > 0.001f;
 
         bool is_rotate = std::abs(constrain_vel_vertical_1 - constrain_vel_vertical_2) > 0.01;
 
@@ -624,11 +630,9 @@ namespace control {
         update_s = control_period_sec;
         time = now;
 
-        PLOGD <<"w0 createCommand";
-        m_steer_wheel[0].createCommand();
-        PLOGD <<"w1 createCommand";
-        m_steer_wheel[1].createCommand();
-
+        for(size_t i = 0 ; i < m_steer_wheel.size(); i++){
+            m_steer_wheel[i].createCommand();
+        }
 
 
         bool is_command_rotate = std::abs(m_cmd_rot_vel) > 0.0001f;
@@ -899,8 +903,8 @@ namespace control {
 
             }
             if (is_steer_forward_stopped_0 && is_steer_forward_stopped_1) {
-                m_steer_wheel[0].interpolate_command_rotate_angle = -m_steer_wheel[0].mount_position_yaw;
-                m_steer_wheel[1].interpolate_command_rotate_angle = -m_steer_wheel[1].mount_position_yaw;
+                m_steer_wheel[0].interpolate_command_rotate_angle = 0.0f;
+                m_steer_wheel[1].interpolate_command_rotate_angle = 0.0f;
             }
 
             return;
@@ -934,16 +938,14 @@ namespace control {
                         float valid_rot_1 = m_steer_wheel[0].actual_angle_in_motor + rot_ratio_1 *
                                                                                      (rot_control_diff_1);
 
-                        float valid_rot_in_base_1 = valid_rot_1 + m_steer_wheel[0].mount_position_yaw;
-
+                        float valid_rot_in_base_1 = valid_rot_1;
 
                         float rot_ratio_2 = rot_step / std::abs(
                                 rot_control_diff_2);
                         rot_ratio_2 = std::min(1.0f, rot_ratio_2);
                         float valid_rot_2 = m_steer_wheel[1].actual_angle_in_motor + rot_ratio_2 *
                                                                                      (rot_control_diff_2);
-                        float valid_rot_in_base_2 = valid_rot_2 + m_steer_wheel[1].mount_position_yaw;
-
+                        float valid_rot_in_base_2 = valid_rot_2;
 
                         m_steer_wheel[0].interpolate_command_rotate_angle = valid_rot_1;
                         m_steer_wheel[1].interpolate_command_rotate_angle = valid_rot_2;
@@ -974,16 +976,14 @@ namespace control {
                     float valid_rot_1 = m_steer_wheel[0].actual_angle_in_motor + rot_ratio_1 *
                                                                                  (rot_control_diff_1);
 
-                    float valid_rot_in_base_1 = valid_rot_1 + m_steer_wheel[0].mount_position_yaw;
-
+                    float valid_rot_in_base_1 = valid_rot_1 ;
 
                     float rot_ratio_2 = rot_step / std::abs(
                             rot_control_diff_2);
                     rot_ratio_2 = std::min(1.0f, rot_ratio_2);
                     float valid_rot_2 = m_steer_wheel[1].actual_angle_in_motor + rot_ratio_2 *
                                                                                  (rot_control_diff_2);
-                    float valid_rot_in_base_2 = valid_rot_2 + m_steer_wheel[1].mount_position_yaw;
-
+                    float valid_rot_in_base_2 = valid_rot_2;
 
                     //
                     float steer_constrain_ratio_1 = std::cos(valid_rot_in_base_1- constrain_angle);
@@ -1102,16 +1102,14 @@ namespace control {
                         float valid_rot_1 = m_steer_wheel[0].actual_angle_in_motor + rot_ratio_1 *
                                                                                      (rot_control_diff_1);
 
-                        float valid_rot_in_base_1 = valid_rot_1 + m_steer_wheel[0].mount_position_yaw;
-
+                        float valid_rot_in_base_1 = valid_rot_1;
 
                         float rot_ratio_2 = rot_step / std::abs(
                                 rot_control_diff_2);
                         rot_ratio_2 = std::min(1.0f, rot_ratio_2);
                         float valid_rot_2 = m_steer_wheel[1].actual_angle_in_motor + rot_ratio_2 *
                                                                                      (rot_control_diff_2);
-                        float valid_rot_in_base_2 = valid_rot_2 + m_steer_wheel[1].mount_position_yaw;
-
+                        float valid_rot_in_base_2 = valid_rot_2;
 
                         m_steer_wheel[0].interpolate_command_rotate_angle = valid_rot_1;
                         m_steer_wheel[1].interpolate_command_rotate_angle = valid_rot_2;
@@ -1530,8 +1528,7 @@ namespace control {
 
         {
             m_steer_wheel[0].target_forward_vel = forward_vel_1;
-            m_steer_wheel[0].target_rot_angle =
-                    m_steer_wheel[0].mount_position_yaw + m_steer_wheel[0].enable_rot * rot_angle_1;
+            m_steer_wheel[0].target_rot_angle =  m_steer_wheel[0].enable_rot * rot_angle_1;
 
 
             float update_s = common::ToMicroSeconds(now - m_steer_wheel[0].time) * 1e-6;
@@ -1564,8 +1561,7 @@ namespace control {
         }
         {
             m_steer_wheel[1].target_forward_vel = forward_vel_2;
-            m_steer_wheel[1].target_rot_angle =
-                    m_steer_wheel[1].mount_position_yaw + m_steer_wheel[1].enable_rot * rot_angle_2;
+            m_steer_wheel[1].target_rot_angle = m_steer_wheel[1].enable_rot * rot_angle_2;
 
             float update_s = common::ToMicroSeconds(now - m_steer_wheel[1].time) * 1e-6;
             float vel_step = update_s * m_steer_wheel[1].max_forward_acc;

@@ -128,6 +128,40 @@ void NMT::discover_nodes(const std::function<int(const Message&)>& func) {
         std::this_thread::sleep_for(pause);
     }
 }
+
+    void NMT::process_incoming_emcy_message(const kaco::Message &message) {
+
+
+        DEBUG_LOG("EMCY message from node "
+                          <<(unsigned)message.get_node_id()<<".");
+
+        uint8_t data = message.data[0];
+        uint8_t state = data&0x7F;
+
+        if (message.rtr) {
+            DEBUG_LOG("EMCY: Ignoring remote transmission request.");
+            DEBUG_DUMP(message.cob_id);
+            return;
+        }
+
+        //bool toggle_bit = data>>7;
+        //DEBUG_DUMP(toggle_bit);
+
+        {
+            std::lock_guard<std::mutex> scoped_lock(m_device_emcy_callbacks_mutex);
+            for (const auto& callback : m_device_emcy_callbacks) {
+//                DEBUG_LOG("Calling new device callback (async)");
+                // The future returned by std::async has to be stored,
+                // otherwise the immediately called future destructor
+                // blocks until callback has finished.
+//					m_callback_futures.push_front(std::async(std::launch::async, callback, message));
+                 if(message.get_node_id() != 0){
+                     callback(message );
+                 }
+            }
+        }
+    }
+
 void NMT::process_incoming_message(const Message& message) {
 
 	DEBUG_LOG("NMT Error Control message from node "
@@ -169,9 +203,9 @@ void NMT::process_incoming_message(const Message& message) {
 					// The future returned by std::async has to be stored,
 					// otherwise the immediately called future destructor
 					// blocks until callback has finished.
-					std::lock_guard<std::mutex> scoped_lock(m_callback_futures_mutex);
+//					std::lock_guard<std::mutex> scoped_lock(m_callback_futures_mutex);
 //					m_callback_futures.push_front(std::async(std::launch::async, callback, message));
-                    callback(message);
+                    callback(message, (NodeState) state );
 				}
 			}
 			break;
@@ -232,6 +266,12 @@ void NMT::process_incoming_message(const Message& message) {
 void NMT::register_device_alive_callback(const DeviceAliveCallback& callback) {
 	std::lock_guard<std::mutex> scoped_lock(m_device_alive_callbacks_mutex);
 	m_device_alive_callbacks.push_back(callback);
+}
+
+    void NMT::register_device_emcy_callback(const kaco::NMT::DeviceEmcyCallback &callback) {
+        std::lock_guard<std::mutex> scoped_lock(m_device_emcy_callbacks_mutex);
+        m_device_emcy_callbacks.push_back(callback);
+
 }
 
 void NMT::register_new_device_callback(const NewDeviceCallback& callback) {
