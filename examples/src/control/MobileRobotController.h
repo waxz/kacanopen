@@ -4,7 +4,7 @@
 
 #ifndef CMAKE_SUPER_BUILD_MOBILEROBOTCONTROLLER_H
 #define CMAKE_SUPER_BUILD_MOBILEROBOTCONTROLLER_H
-
+#include <chrono>
 #include "transform/transform.h"
 #include "common/clock_time.h"
 #include "math/math_basic.h"
@@ -118,6 +118,9 @@ namespace control {
 
 
     public:
+        typedef std::chrono::high_resolution_clock Clock;
+        std::chrono::system_clock::time_point new_time;
+
         enum class StateCode{
             Uninitialised = 0,
             OK = 1,
@@ -138,6 +141,7 @@ namespace control {
     protected:
         // time stamp
         common::Time time;
+
         float control_period_sec = 0.01;
 
         bool control_need_forward_zero = false;
