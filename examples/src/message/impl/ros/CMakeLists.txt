@@ -10,6 +10,7 @@ target_include_directories(ros_message_manager PUBLIC
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
+        ${CMAKE_CURRENT_LIST_DIR}
 
         ${EIGEN3_INCLUDE_DIR})
 

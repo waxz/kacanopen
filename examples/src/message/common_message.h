@@ -69,6 +69,15 @@ namespace common_message{
         std::string target_frame;
         Eigen::Transform<float,3,Eigen::Isometry> transform;
     };
+
+    struct CanMessage{
+        u_int32_t id;
+        bool is_rtr;
+        bool is_extended;
+        bool is_error;
+        u_int8_t dlc;
+        u_int8_t data[8];
+    };
 }
 
 #endif //CMAKE_SUPER_BUILD_COMMON_MESSAGE_H

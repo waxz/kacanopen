@@ -340,5 +340,7 @@ namespace message{
     }
     template long RosMessageManager::add_channel<common_message::Odometry>(const char *);
     template long RosMessageManager::add_channel<common_message::Twist>(const char *);
-    template long RosMessageManager::create_sub<common_message::Twist>(char * , int );
+    template long RosMessageManager::add_channel<std::vector<common_message::CanMessage>>(const char *);
+//    template long RosMessageManager::create_sub<common_message::Twist>(char * , int );
+
 }

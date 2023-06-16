@@ -522,7 +522,7 @@ namespace control {
             actual_forward_vel = 0.0;
             actual_forward_angle = 0.0;
             actual_rotate_vel = 0.0;
-            time = common::FromUnixNow();\
+            time = common::FromUnixNow();
              new_time = Clock::now();
             PLOGD << "position:\n" << position;
             return;
@@ -598,30 +598,30 @@ namespace control {
 
 
             common::Time  now =  common::FromUnixNow();
-            auto new_now = Clock::now();
+//            auto new_now = Clock::now();
 
             float update_s = common::ToMicroSeconds(now - time) * 1e-6f;
-            float new_update_s = (new_now - new_time).count() * 1e-9f;
+//            float new_update_s = (new_now - new_time).count() * 1e-9f;
             time = now;
-            new_time = new_now;
+//            new_time = new_now;
 
             float update_step = 1e-3f;
-            PLOGD << "update_s: " << update_s;
-            PLOGD << "new_update_s: " << new_update_s;
-            update_s = new_update_s;
+//            PLOGD << "update_s: " << update_s;
+//            PLOGD << "new_update_s: " << new_update_s;
+//            update_s = new_update_s;
 
-            PLOGD << "base_vel[x,y,w]: " << base_vel_x << ", " << base_vel_y<< ", " << actual_rotate_vel;
-            PLOGD << "origin position: " << position;
+//            PLOGD << "base_vel[x,y,w]: " << base_vel_x << ", " << base_vel_y<< ", " << actual_rotate_vel;
+//            PLOGD << "origin position: " << position;
 
             transform::Transform2d relative_pose;
             while (update_s > 0.0001){
                 float s = std::min(update_step, update_s);
                 relative_pose.set(base_vel_x * s, base_vel_y * s,actual_rotate_vel*s );
-                PLOGD << "relative_pose: " << relative_pose;
+//                PLOGD << "relative_pose: " << relative_pose;
 
                 position = position * relative_pose;
                 update_s -= update_step;
-                PLOGD << "update position:\n" << position;
+//                PLOGD << "update position:\n" << position;
 
             }
             PLOGD << "final position:\n" << position;
@@ -640,10 +640,7 @@ namespace control {
 
     void DoubleSteerController::interpolate() {
 
-        common::Time now = common::FromUnixNow();
-        float update_s = common::ToMicroSeconds(now - time) * 1e-6;
-        update_s = control_period_sec;
-        time = now;
+        float update_s  = control_period_sec;
 
         for(size_t i = 0 ; i < m_steer_wheel.size(); i++){
             m_steer_wheel[i].createCommand();

@@ -11,8 +11,7 @@
 #include <geometry_msgs/Twist.h>
 #include <nav_msgs/Odometry.h>
 #include <tf/transform_datatypes.h>
-
-
+#include <yocs_msgs/canMessageArray.h>
 
 namespace common_message{
 
@@ -222,6 +221,50 @@ namespace common_message{
         target.setOrigin(tf::Vector3(tx, ty,tz));
         target.setRotation(tf::Quaternion(qx,qy,qz,qw));
         common::ToRos(data.time, target.stamp_);
+
+    }
+
+    inline common_message::CanMessage to_common(const yocs_msgs::canMessage& data){
+        common_message::CanMessage target;
+        target.id = data.id;
+        target.is_rtr = data.is_rtr;
+        target.is_extended = data.is_extended;
+        target.is_error = data.is_error;
+        target.dlc = data.dlc;
+        std::copy(std::begin(data.data),std::end(data.data), std::begin(target.data));
+
+        return target;
+    }
+
+    inline yocs_msgs::canMessage from_common(const  common_message::CanMessage & data){
+        yocs_msgs::canMessage  target;
+        target.id = data.id;
+        target.is_rtr = data.is_rtr;
+        target.is_extended = data.is_extended;
+        target.is_error = data.is_error;
+        target.dlc = data.dlc;
+        std::copy(std::begin(data.data),std::end(data.data), std::begin(target.data));
+        return target;
+
+    }
+
+    inline std::vector<common_message::CanMessage> to_common(const yocs_msgs::canMessageArray & data){
+        std::vector<common_message::CanMessage> target;
+        target.resize(data.messages.size());
+        for(size_t i = 0 ; i < target.size(); i++){
+            target[i] = to_common(data.messages[i]);
+        }
+        return target;
+
+    }
+
+    inline yocs_msgs::canMessageArray from_common(const std::vector<common_message::CanMessage>& data){
+        yocs_msgs::canMessageArray target;
+        target.messages.resize(data.size());
+        for(size_t i = 0 ; i < target.messages.size(); i++){
+            target.messages[i] = from_common(data[i]);
+        }
+        return target;
 
     }
 }

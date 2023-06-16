@@ -206,13 +206,13 @@ void Core::received_message(const Message& message) {
 	DEBUG_LOG("Received message:");
 
 	// cleaning up old futures
-	if (m_cleanup_futures) {
-		std::lock_guard<std::mutex> scoped_lock(m_callback_futures_mutex);
-		m_callback_futures.remove_if([](const std::future<void>& f) {
-			// return true if callback has finished it's computation.
-			return (f.wait_for(std::chrono::steady_clock::duration::zero())==std::future_status::ready);
-		});
-	}
+//	if (m_cleanup_futures) {
+//		std::lock_guard<std::mutex> scoped_lock(m_callback_futures_mutex);
+//		m_callback_futures.remove_if([](const std::future<void>& f) {
+//			// return true if callback has finished it's computation.
+//			return (f.wait_for(std::chrono::steady_clock::duration::zero())==std::future_status::ready);
+//		});
+//	}
 
 	// first call registered callbacks
 	{
@@ -221,10 +221,9 @@ void Core::received_message(const Message& message) {
 			// The future returned by std::async has to be stored,
 			// otherwise the immediately called future destructor
 			// blocks until callback has finished.
-			std::lock_guard<std::mutex> scoped_lock(m_callback_futures_mutex);
-			m_callback_futures.push_front(
-				std::async(std::launch::async, callback, message)
-			);
+//			std::lock_guard<std::mutex> scoped_lock(m_callback_futures_mutex);
+//			m_callback_futures.push_front( std::async(std::launch::async, callback, message) );
+            callback(message);
 		}
 	}
 

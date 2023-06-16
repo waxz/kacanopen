@@ -363,7 +363,7 @@ void from_json(const nlohmann::json& j, ControllerConfig& object) {
         auto& property = std::get<i>(ControllerConfig_properties);
         // set the value to the member
         if(j.contains(property.name))
-        object.*(property.member) = j[property.name];
+        j.at(property.name).get_to(object.*(property.member));
         else{
             std::cerr << "from_json: key["<<property.name<<"] not exist"<< std::endl;
         }
@@ -408,7 +408,7 @@ void from_json(const nlohmann::json& j, RawCommand& object) {
         auto& property = std::get<i>(RawCommand_properties);
         // set the value to the member
         if(j.contains(property.name))
-            object.*(property.member) = j[property.name];
+            j.at(property.name).get_to(object.*(property.member));
         else{
             std::cerr << "from_json: key["<<property.name<<"] not exist"<< std::endl;
         }
@@ -421,6 +421,50 @@ struct Controller{
 };
 
 
+struct CanMsgForward{
+    size_t channel_id = 0;
+    std::vector<uint16_t> recv_cob_id;
+    std::string sub_topic;
+    std::string pub_topic;
+};
+constexpr auto CanMsgForward_properties = std::make_tuple(
+        common::property(&CanMsgForward::channel_id, "channel_id"),
+        common::property(&CanMsgForward::recv_cob_id, "recv_cob_id") ,
+        common::property(&CanMsgForward::sub_topic, "sub_topic"),
+        common::property(&CanMsgForward::pub_topic, "pub_topic")
+);
+
+void to_json(nlohmann::json& j, const CanMsgForward& object)
+{
+
+    constexpr auto nbProperties = std::tuple_size<decltype(CanMsgForward_properties)>::value;
+    common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
+        // get the property
+        auto& property = std::get<i>(CanMsgForward_properties);
+        // set the value to the member
+        j[property.name] = object.*(property.member);
+    });
+}
+
+void from_json(const nlohmann::json& j, CanMsgForward& object) {
+
+    constexpr auto nbProperties = std::tuple_size<decltype(CanMsgForward_properties)>::value;
+    common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
+        // get the property
+        auto& property = std::get<i>(CanMsgForward_properties);
+        // set the value to the member
+        if(j.contains(property.name))
+//            object.*(property.member) = j[property.name];
+           j.at(property.name).get_to(object.*(property.member));
+        else{
+            std::cerr << "from_json: key["<<property.name<<"] not exist"<< std::endl;
+        }
+    });
+}
+
+struct CanForward{
+
+};
 int test_tec(int argc, char** argv) {
 
 
@@ -428,7 +472,7 @@ int test_tec(int argc, char** argv) {
     auto my_handler = common::fnptr<void(int)>([&](int sig){ std::cout << "get sig " << sig;program_run = false;});
     common::set_signal_handler(my_handler);
 
-    plog::RollingFileAppender<plog::CsvFormatter> fileAppender("tec.csv", 8000000, 20); // Create the 1st appender.
+    plog::RollingFileAppender<plog::CsvFormatter> fileAppender("tec.csv", 80000000, 20); // Create the 1st appender.
     plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender; // Create the 2nd appender.
     plog::init(plog::debug, &fileAppender).addAppender(&consoleAppender); // Initialize the logger with the both appenders.
 
@@ -457,11 +501,14 @@ int test_tec(int argc, char** argv) {
     std::string mqtt_sub_topic = "hello_lua";
     std::string config_file;
 
+    std::string can_forward_file;
+
 
     float forward_vel_acc = 0.8;
     float rotate_angle_vel = 0.8;
 
     bool use_rot_angle_abs = false;
+
 
     auto cli
             =  lyra::exe_name(exe_name)
@@ -474,6 +521,7 @@ int test_tec(int argc, char** argv) {
                | lyra::opt(feedback_timeout_ms,"feedback_timeout_ms")["-f"]["--feedback_timeout"]("feedback_timeout_ms")
                | lyra::opt(initialise_wait_s,"initialise_wait_s")["-i"]["--initialise_wait_s"]("initialise_wait_s")
                  | lyra::opt(mqtt_server,"mqtt_server")["-M"]["--mqtt_server"]("mqtt_server")
+                   | lyra::opt(can_forward_file,"can_forward_file")["-T"]["--can_forward_file"]("can_forward_file")
 
                  //---
                  | lyra::group().sequential()
@@ -519,6 +567,7 @@ int test_tec(int argc, char** argv) {
 
     std::vector<ControllerConfig> SteerConfigArray;
     std::vector<ControllerState >SteerStateArray;
+    std::vector<CanMsgForward> CanForwardConfigArray;
 
 
     if(!config_file.empty()){
@@ -560,6 +609,33 @@ int test_tec(int argc, char** argv) {
         }
     }
 
+
+    if(!can_forward_file.empty()){
+        std::ifstream ifs(can_forward_file.c_str());
+        if(ifs.is_open()){
+
+            try{
+                nlohmann::json jf = nlohmann::json::parse(ifs);
+
+                std::cout << "can_forward_file: " << can_forward_file<< "\n jf :\n" << jf << std::endl;
+
+                CanForwardConfigArray = jf;
+            }catch(nlohmann::detail::parse_error & e) {
+
+                std::cout << e.what() << std::endl;
+                std::cout << "json format error in can_forward_file: " << can_forward_file<<  std::endl;
+
+                return 0;
+
+            }
+
+
+        }else{
+            std::cout << "can_forward_file not exist" << std::endl;
+            return 0;
+
+        }
+    }
 
     extra_command.emplace_back(exe_name);
     std::copy(command.begin(), command.end(), std::back_inserter(extra_command));
@@ -905,41 +981,37 @@ int test_tec(int argc, char** argv) {
             return;
         }
 
+        PLOGD <<"control_wheel :[enable]: " <<enable;
 
+        forward_vel_1 *= enable;
+        rotate_angle_1 *= enable;
+        forward_vel_2 *= enable;
+        rotate_angle_2 *= enable;
         PLOGD <<"control_wheel 1:[forward_vel, rotate_angle]: " << forward_vel_1 << ", " << rotate_angle_1;
         PLOGD <<"control_wheel 2:[forward_vel, rotate_angle]: " << forward_vel_2 << ", " << rotate_angle_2;
 
-        if(enable){
 
 
-            *(int*)(&driver_command_msg_channel_1[0].data[0]) = forward_vel_1 / SteerConfigArray[0].forward_speed_k;
-            *(int*)(&driver_command_msg_channel_1[1].data[0]) = (rotate_angle_1 - SteerConfigArray[0].rot_angle_b + SteerConfigArray[0].rot_angle_abs_offset)/SteerConfigArray[0].rot_angle_k + SteerConfigArray[0].rot_angle_abs_offset;
+        *(int*)(&driver_command_msg_channel_1[0].data[0]) = forward_vel_1 / SteerConfigArray[0].forward_speed_k;
+        *(int*)(&driver_command_msg_channel_1[1].data[0]) = (rotate_angle_1 - SteerConfigArray[0].rot_angle_b + SteerConfigArray[0].rot_angle_abs_offset)/SteerConfigArray[0].rot_angle_k + SteerConfigArray[0].rot_angle_abs_offset;
 
-            *(int*)(&driver_command_msg_channel_2[0].data[0]) = forward_vel_2 / SteerConfigArray[1].forward_speed_k;
-            *(int*)(&driver_command_msg_channel_2[1].data[0]) = (rotate_angle_2 - SteerConfigArray[1].rot_angle_b + SteerConfigArray[1].rot_angle_abs_offset)/SteerConfigArray[1].rot_angle_k + SteerConfigArray[1].rot_angle_abs_offset;
+        *(int*)(&driver_command_msg_channel_2[0].data[0]) = forward_vel_2 / SteerConfigArray[1].forward_speed_k;
+        *(int*)(&driver_command_msg_channel_2[1].data[0]) = (rotate_angle_2 - SteerConfigArray[1].rot_angle_b + SteerConfigArray[1].rot_angle_abs_offset)/SteerConfigArray[1].rot_angle_k + SteerConfigArray[1].rot_angle_abs_offset;
 
-            PLOGD << "send can data to channel 1";
-            driver_command_msg_channel_1[0].print();
-            driver_command_msg_channel_1[1].print();
+        PLOGD << "send can data to channel 1";
+        driver_command_msg_channel_1[0].print();
+        driver_command_msg_channel_1[1].print();
 
 
-            PLOGD << "send can data to channel 2";
-            driver_command_msg_channel_2[0].print();
-            driver_command_msg_channel_2[1].print();
+        PLOGD << "send can data to channel 2";
+        driver_command_msg_channel_2[0].print();
+        driver_command_msg_channel_2[1].print();
 
-            device.send(driver_command_msg_channel_1.data(),driver_command_msg_channel_1.size(),0);
-            device.send(driver_command_msg_channel_2.data(),driver_command_msg_channel_2.size(),1);
+        device.send(driver_command_msg_channel_1.data(),driver_command_msg_channel_1.size(),0);
+        device.send(driver_command_msg_channel_2.data(),driver_command_msg_channel_2.size(),1);
 
-        }else{
 
-            *(int*)(&driver_command_msg_channel_1[0].data[0]) = 0;
-            *(int*)(&driver_command_msg_channel_1[1].data[0]) = 0;
-
-            *(int*)(&driver_command_msg_channel_2[0].data[0]) = 0;
-            *(int*)(&driver_command_msg_channel_2[1].data[0]) = 0;
-            device.send(driver_command_msg_channel_1.data(),driver_command_msg_channel_1.size(),0);
-            device.send(driver_command_msg_channel_2.data(),driver_command_msg_channel_2.size(),1);
-
+        if(!enable) {
 
             disable_forward_driver(1);
             disable_rotate_driver(2);
@@ -951,6 +1023,7 @@ int test_tec(int argc, char** argv) {
 
     };
 
+    bool state_update = false;
     auto update_wheel_forward = [&](size_t driver_id, const kaco::Message& message){
 
         PLOGD << "receive [" << driver_id << "]";
@@ -960,6 +1033,7 @@ int test_tec(int argc, char** argv) {
         std::bitset<16> fault_code = * (int*)(&message.data[4]);
 
         SteerConfigArray[driver_id].actual_forward_vel = num * SteerConfigArray[driver_id].forward_speed_k;
+        state_update = true;
 
         PLOGD << "actual_forward_vel: " << SteerConfigArray[driver_id].actual_forward_vel;
     };
@@ -973,6 +1047,7 @@ int test_tec(int argc, char** argv) {
         float rot_angle = num * SteerConfigArray[driver_id].rot_angle_k +  SteerConfigArray[driver_id].rot_angle_b;
 
         SteerConfigArray[driver_id].addAngle(rot_angle);
+        state_update = true;
         PLOGD << "actual_rot_angle: " << rot_angle;
 
     };
@@ -1036,6 +1111,115 @@ int test_tec(int argc, char** argv) {
 
     }
 
+    // can forward
+    std::vector<std::vector<common_message::CanMessage>> can_channel_forward_msg(2);
+    std::vector<std::vector<kaco::Message>> can_channel_send_msg(2);
+
+
+
+    for(size_t i = 0 ; i < CanForwardConfigArray.size();i++){
+        auto& c = CanForwardConfigArray[i];
+
+        if(c.channel_id <0 || c.channel_id>1 || c.recv_cob_id.empty() || c.pub_topic.empty() || c.sub_topic.empty() ){
+            continue;
+        }
+
+        // ros
+
+//        rosMessageManager.add_channel<common_message::Odometry>("PUB:odom:200");
+        std::string sub_topic = absl::StrFormat("SUB:%s:100", c.sub_topic.c_str());
+        rosMessageManager.add_channel<std::vector<common_message::CanMessage>>(sub_topic.c_str());
+
+        std::string pub_topic = absl::StrFormat("PUB:%s:100", c.pub_topic.c_str());
+        rosMessageManager.add_channel<std::vector<common_message::CanMessage>>(pub_topic.c_str());
+
+
+
+        //can
+#if 0
+
+        for(size_t  j = 0 ; j < c.recv_cob_id.size();j++){
+            device.pdo.add_pdo_received_callback(c.recv_cob_id[j], [&c,&can_channel_forward_msg](const kaco::Message& message){
+
+                std::cout << "can forward : " << int(message.get_node_id())  <<std::endl;
+                message.print();
+                common_message::CanMessage msg;
+                msg.id = message.cob_id;
+                msg.is_rtr = message.rtr;
+                msg.is_extended = message.ext;
+                msg.is_error = false;
+                msg.dlc = message.len;
+                std::copy(std::begin(message.data), std::end(message.data), std::begin(msg.data));
+                can_channel_forward_msg[c.channel_id].push_back(msg);
+
+
+            });
+
+
+        }
+#endif
+
+        device.register_receive_callback([&c,&can_channel_forward_msg](const kaco::Message& message){
+
+            auto it = std::find(c.recv_cob_id.begin(), c.recv_cob_id.end(),message.cob_id);
+            if(it ==c.recv_cob_id.end() ){
+
+                return ;
+            }else{
+                PLOGD << "recv data" << std::endl;
+
+                common_message::CanMessage msg;
+                msg.id = message.cob_id;
+                msg.is_rtr = message.rtr;
+                msg.is_extended = message.ext;
+                msg.is_error = false;
+                msg.dlc = message.len;
+                std::copy(std::begin(message.data), std::end(message.data), std::begin(msg.data));
+                can_channel_forward_msg[c.channel_id].push_back(msg);
+            }
+
+        });
+        auto can_message_sub_cb =[&c,&can_channel_send_msg](void* data){
+            std::vector<common_message::CanMessage> * data_ptr = static_cast<std::vector<common_message::CanMessage>*>(data);
+
+            kaco::Message msg;
+            PLOGD << "recv data" << std::endl;
+
+            for(size_t i = 0 ; i < data_ptr->size();i++){
+                msg.cob_id = data_ptr->at(i).id;
+                msg.rtr = data_ptr->at(i).is_rtr;
+                msg.ext = data_ptr->at(i).is_extended;
+                msg.len = data_ptr->at(i).dlc;
+                std::copy(std::begin(data_ptr->at(i).data), std::end(data_ptr->at(i).data), std::begin(msg.data));
+                can_channel_send_msg[c.channel_id].push_back(msg);
+            }
+
+        };
+        taskManager.addTask([&rosMessageManager,&c,&device,&can_channel_send_msg,can_message_sub_cb]{
+
+
+            rosMessageManager.recv_message(c.sub_topic.c_str(),10,0.001, can_message_sub_cb);
+
+            if(can_channel_send_msg[c.channel_id].empty()){
+                return true;
+            }
+
+            device.send( can_channel_send_msg[c.channel_id].data(), can_channel_send_msg[c.channel_id].size(),c.channel_id);
+            can_channel_send_msg[c.channel_id].clear();
+
+            return true;
+        },100*1000,2);
+        taskManager.addTask([&rosMessageManager,&c,&can_channel_forward_msg]{
+            if(can_channel_forward_msg[c.channel_id].empty()){
+                return true;
+            }
+
+            rosMessageManager.send_message(c.pub_topic.c_str(),&can_channel_forward_msg[c.channel_id], 1, 0.1 );
+            can_channel_forward_msg[c.channel_id].clear();
+            return true;
+        },100*1000,2);
+
+    }
     // controller
     control::DoubleSteerController controller;
 
@@ -1075,10 +1259,10 @@ int test_tec(int argc, char** argv) {
 
             check_all_state();
             // if not operational, send nmt start
-            if(!is_all_alive){
-                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_1);
-                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_2);
-            }
+//            if(!is_all_alive){
+//                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_1);
+//                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_2);
+//            }
             device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_1);
             device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_2);
 
@@ -1087,7 +1271,7 @@ int test_tec(int argc, char** argv) {
             }
 
             return true;
-        },500*1000,0);
+        },1000*1000,0);
 
         taskManager.addTask([&]{
             device.nmt.send_sync_message(send_to_channel_1);
@@ -1095,7 +1279,7 @@ int test_tec(int argc, char** argv) {
             device.recv_message(message_buffer,0, message_buffer.size());
             device.recv_message(message_buffer,1, message_buffer.size());
             return true;
-        },10*1000,0);
+        },5*1000,0);
 
 
         // initializer
@@ -1174,7 +1358,10 @@ int test_tec(int argc, char** argv) {
             PLOGD << "update driver0 feedback[forward_vel, rotate_angle], " << SteerConfigArray[0].actual_forward_vel << ", " << SteerConfigArray[0].actual_rot_abs_angle;
             PLOGD << "update driver1 feedback[forward_vel, rotate_angle], " << SteerConfigArray[1].actual_forward_vel << ", " << SteerConfigArray[1].actual_rot_abs_angle;
 
-            controller.updateState(SteerConfigArray[0].actual_forward_vel,SteerConfigArray[0].actual_rot_abs_angle, SteerConfigArray[1].actual_forward_vel,SteerConfigArray[1].actual_rot_abs_angle);
+            {
+                controller.updateState(SteerConfigArray[0].actual_forward_vel,SteerConfigArray[0].actual_rot_abs_angle, SteerConfigArray[1].actual_forward_vel,SteerConfigArray[1].actual_rot_abs_angle);
+                state_update = false;
+            }
 
 
 
@@ -1246,7 +1433,7 @@ int test_tec(int argc, char** argv) {
 
 
         return true;
-    }, 10*1000,1);
+    }, 15*1000,1);
 
     // cmd_vel
     int cmd_vel_timeout_counter = 0;
