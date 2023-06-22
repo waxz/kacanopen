@@ -158,6 +158,14 @@ namespace control {
 
                 m_steer_wheel[0].target_forward_vel = m_cmd_rot_vel * command_rotate_radius;
                 m_steer_wheel[1].target_forward_vel = m_cmd_rot_vel * command_rotate_radius;
+                float vel_ratio[2];
+                vel_ratio[0] = m_steer_wheel[0].target_forward_vel/m_steer_wheel[0].max_forward_vel;
+                vel_ratio[1] = m_steer_wheel[1].target_forward_vel/m_steer_wheel[1].max_forward_vel;
+                if(std::abs(vel_ratio[0] ) > 1.0 || std::abs(vel_ratio[1] ) > 1.0){
+                    int max_id = std::abs(vel_ratio[1] )> std::abs(vel_ratio[0] ) ? 1:0;
+                    m_steer_wheel[0].target_forward_vel /= std::abs(vel_ratio[max_id]);
+                    m_steer_wheel[1].target_forward_vel /= std::abs(vel_ratio[max_id]);
+                }
 
             }
 
@@ -686,8 +694,16 @@ namespace control {
 
         float rot_control_diff_1 = m_steer_wheel[0].command_rotate_angle - m_steer_wheel[0].actual_angle_in_motor;
         float rot_control_diff_2 = m_steer_wheel[1].command_rotate_angle - m_steer_wheel[1].actual_angle_in_motor;
-        bool need_rotate_sync = is_steer_forward_stopped_0 && is_steer_forward_stopped_1;
+        // need_rotate_sync: forward motor should be stopped before rotate motor reach target
+        bool need_rotate_sync = is_steer_forward_stopped_0 && is_steer_forward_stopped_1 ;
+#if 0
+        if(std::abs(rot_control_diff_1) > M_PI_2f32 || std::abs(rot_control_diff_2) > M_PI_2f32){
+            move_state_type = MoveType::Stop;
+            smooth_stop_temp = true;
+        }else{
 
+        }
+#endif
 
         if (!is_command_move && !is_command_rotate) {
             move_cmd_type = MoveType::Stop;
@@ -754,6 +770,7 @@ namespace control {
         } else if (move_state_type == MoveType::Stop) {
             if(is_steer_forward_stopped_0 && is_steer_forward_stopped_1){
 
+                smooth_stop_temp = false;
                 move_state_type = move_cmd_type;
                 move_state_flag = 0;
             }else{
@@ -824,7 +841,8 @@ namespace control {
             m_steer_wheel[1].command_forward_vel = 0.0;
 
 
-            if (smooth_stop) {
+            if (smooth_stop || smooth_stop_temp) {
+
                 // smooth forward_vel and rotate_angle
 
                 bool need_update = move_state_flag == 0
@@ -914,11 +932,12 @@ namespace control {
                 m_steer_wheel[1].interpolate_command_rotate_angle = m_steer_wheel[1].actual_angle_in_motor;
 
             }
+#if 0
             if (is_steer_forward_stopped_0 && is_steer_forward_stopped_1) {
                 m_steer_wheel[0].interpolate_command_rotate_angle = 0.0f;
                 m_steer_wheel[1].interpolate_command_rotate_angle = 0.0f;
             }
-
+#endif
             return;
         } else if (move_state_type == MoveType::Forward_No_Rotate || move_state_type == MoveType::Forward_And_Rotate ) {
             PLOGD << "move_state_type: " << "Forward_No_Rotate/Forward_And_Rotate";
@@ -1039,12 +1058,13 @@ namespace control {
                         constrain_vel_2 = std::abs(ratio) <= 1.0 ? (valid_vel_2) : (ratio * valid_vel_1);
                     }
 
+//                    bool slow_down = std::abs(rot_control_diff_1) > 0.1 ||  std::abs(rot_control_diff_2) > 0.1;
+//                    m_steer_wheel[0].interpolate_command_forward_vel = constrain_vel_1 * (slow_down ? 0.5:1.0);
+//                    m_steer_wheel[1].interpolate_command_forward_vel = constrain_vel_2 * (slow_down ? 0.5:1.0) ;
                     m_steer_wheel[0].interpolate_command_forward_vel = constrain_vel_1;
                     m_steer_wheel[1].interpolate_command_forward_vel = constrain_vel_2;
                     m_steer_wheel[0].interpolate_command_rotate_angle = valid_rot_1;
                     m_steer_wheel[1].interpolate_command_rotate_angle = valid_rot_2;
-
-
 
                 }
                 if(is_steer_forward_synced_0 && is_steer_forward_synced_1&&is_steer_rotate_synced_0 &&is_steer_rotate_synced_1){

@@ -195,6 +195,8 @@ namespace control {
         float predict_time = 0.01;
 
         bool smooth_stop = true;
+        bool smooth_stop_temp = false;
+
 
         virtual const transform::Transform2d& getPosition() = 0;
         virtual float getActualForwardVel() = 0;
