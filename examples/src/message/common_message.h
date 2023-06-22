@@ -34,16 +34,16 @@ namespace common_message{
     };
 
     struct Point{
-        float x = 0.0;
-        float y = 0.0;
-        float z = 0.0;
+        double x = 0.0;
+        double y = 0.0;
+        double z = 0.0;
     };
 
     struct Quaternion{
-        float x = 0.0;
-        float y = 0.0;
-        float z = 0.0;
-        float w = 1.0;
+        double x = 0.0;
+        double y = 0.0;
+        double z = 0.0;
+        double w = 1.0;
     };
 
     struct Pose{
@@ -51,6 +51,16 @@ namespace common_message{
         Quaternion orientation;
     };
 
+    struct PoseStamped{
+        Header header;
+        Pose pose;
+    };
+
+    struct Path{
+        Header header;
+        std::vector<PoseStamped> poses;
+
+    };
     struct PoseWithCovariance{
         Pose pose;
         float covariance[36] = {0.0};
@@ -67,7 +77,7 @@ namespace common_message{
         common::Time time;
         std::string base_frame;
         std::string target_frame;
-        Eigen::Transform<float,3,Eigen::Isometry> transform;
+        Eigen::Transform<double,3,Eigen::Isometry> transform;
     };
 
     struct CanMessage{
@@ -77,6 +87,9 @@ namespace common_message{
         bool is_error;
         u_int8_t dlc;
         u_int8_t data[8];
+    };
+    struct CanMessageArray{
+       std::vector<CanMessage> messages;
     };
 }
 

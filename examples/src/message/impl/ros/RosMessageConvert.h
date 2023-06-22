@@ -10,6 +10,7 @@
 #include <std_msgs/String.h>
 #include <geometry_msgs/Twist.h>
 #include <nav_msgs/Odometry.h>
+#include <nav_msgs/Path.h>
 #include <tf/transform_datatypes.h>
 #include <yocs_msgs/canMessageArray.h>
 
@@ -180,7 +181,7 @@ namespace common_message{
 
         target.time = common::FromRos(data.stamp_);
 
-        target.transform =  transform::createSe3<float>(data.getOrigin().x(),data.getOrigin().y(),data.getOrigin().z(),
+        target.transform =  transform::createSe3<double>(data.getOrigin().x(),data.getOrigin().y(),data.getOrigin().z(),
                                                         data.getRotation().getW(), data.getRotation().getX(), data.getRotation().getY(), data.getRotation().getZ());
 
         return target;
@@ -193,7 +194,7 @@ namespace common_message{
 
         target.time = common::FromRos(data.stamp_);
 
-        target.transform =  transform::createSe3<float>(data.getOrigin().x(),data.getOrigin().y(),data.getOrigin().z(),
+        target.transform =  transform::createSe3<double>(data.getOrigin().x(),data.getOrigin().y(),data.getOrigin().z(),
                                                         data.getRotation().getW(), data.getRotation().getX(), data.getRotation().getY(), data.getRotation().getZ());
 
     }
@@ -203,8 +204,8 @@ namespace common_message{
         target.frame_id_.assign(data.base_frame);
         target.child_frame_id_.assign(data.target_frame);
 
-        float tx, ty,tz,qw,qx,qy,qz;
-        transform::extractSe3<float>(data.transform, tx, ty,tz,qw,qx,qy,qz);
+        double tx, ty,tz,qw,qx,qy,qz;
+        transform::extractSe3<double>(data.transform, tx, ty,tz,qw,qx,qy,qz);
         target.setOrigin(tf::Vector3(tx, ty,tz));
         target.setRotation(tf::Quaternion(qx,qy,qz,qw));
         common::ToRos(data.time, target.stamp_);
@@ -216,13 +217,51 @@ namespace common_message{
         target.frame_id_.assign(data.base_frame);
         target.child_frame_id_.assign(data.target_frame);
 
-        float tx, ty,tz,qw,qx,qy,qz;
-        transform::extractSe3<float>(data.transform, tx, ty,tz,qw,qx,qy,qz);
+        double tx, ty,tz,qw,qx,qy,qz;
+        transform::extractSe3<double>(data.transform, tx, ty,tz,qw,qx,qy,qz);
         target.setOrigin(tf::Vector3(tx, ty,tz));
         target.setRotation(tf::Quaternion(qx,qy,qz,qw));
         common::ToRos(data.time, target.stamp_);
 
     }
+
+    inline common_message::PoseStamped to_common(const geometry_msgs::PoseStamped & data){
+        common_message::PoseStamped target;
+
+        target.header = to_common(data.header);
+        target.pose = to_common(data.pose);
+        return target;
+    }
+
+    inline geometry_msgs::PoseStamped from_common(const common_message::PoseStamped& data){
+        geometry_msgs::PoseStamped target;
+        target.header = from_common(data.header);
+        target.pose = from_common(data.pose);
+
+        return target;
+    }
+
+    inline common_message::Path to_common(const nav_msgs::Path& data){
+        common_message::Path target;
+
+        target.header = to_common(data.header);
+        target.poses.resize(data.poses.size());
+        for(size_t i = 0 ; i < data.poses.size(); i++){
+            target.poses[i] = to_common(data.poses[i]);
+        }
+        return target;
+    }
+    inline nav_msgs::Path from_common(const common_message::Path& data){
+        nav_msgs::Path target;
+
+        target.header = from_common(data.header);
+        target.poses.resize(data.poses.size());
+        for(size_t i = 0 ; i < data.poses.size(); i++){
+            target.poses[i] = from_common(data.poses[i]);
+        }
+        return target;
+    }
+
 
     inline common_message::CanMessage to_common(const yocs_msgs::canMessage& data){
         common_message::CanMessage target;
@@ -248,21 +287,21 @@ namespace common_message{
 
     }
 
-    inline std::vector<common_message::CanMessage> to_common(const yocs_msgs::canMessageArray & data){
-        std::vector<common_message::CanMessage> target;
-        target.resize(data.messages.size());
-        for(size_t i = 0 ; i < target.size(); i++){
-            target[i] = to_common(data.messages[i]);
+    inline common_message::CanMessageArray to_common(const yocs_msgs::canMessageArray & data){
+        common_message::CanMessageArray target;
+        target.messages.resize(data.messages.size());
+        for(size_t i = 0 ; i < target.messages.size(); i++){
+            target.messages[i] = to_common(data.messages[i]);
         }
         return target;
 
     }
 
-    inline yocs_msgs::canMessageArray from_common(const std::vector<common_message::CanMessage>& data){
+    inline yocs_msgs::canMessageArray from_common(const common_message::CanMessageArray & data){
         yocs_msgs::canMessageArray target;
-        target.messages.resize(data.size());
+        target.messages.resize(data.messages.size());
         for(size_t i = 0 ; i < target.messages.size(); i++){
-            target.messages[i] = from_common(data[i]);
+            target.messages[i] = from_common(data.messages[i]);
         }
         return target;
 

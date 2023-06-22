@@ -314,7 +314,7 @@ namespace message{
         return 0;
     }
 
-    long RosMessageManager::send_tf(common_message::TransformStamped &data) {
+    long RosMessageManager::send_tf(const common_message::TransformStamped &data) {
 
         char * channel_str[] = {"SUB","PUB","TFL","TFB","PAR","PAW"};
 
@@ -323,7 +323,7 @@ namespace message{
 
         auto it = channel_config.find(key_buffer);
         if(it != channel_config.end()){
-            std::cout   << key_buffer << " is already exist" << std::endl;
+//            std::cout   << key_buffer << " is already exist" << std::endl;
         }else{
 
             common::wild_ptr  channel_ptr;
@@ -340,7 +340,9 @@ namespace message{
     }
     template long RosMessageManager::add_channel<common_message::Odometry>(const char *);
     template long RosMessageManager::add_channel<common_message::Twist>(const char *);
-    template long RosMessageManager::add_channel<std::vector<common_message::CanMessage>>(const char *);
+    template long RosMessageManager::add_channel<common_message::CanMessageArray>(const char *);
+    template long RosMessageManager::add_channel<common_message::Path>(const char *);
+
 //    template long RosMessageManager::create_sub<common_message::Twist>(char * , int );
 
 }

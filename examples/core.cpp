@@ -147,6 +147,9 @@ struct ValueStampedBuffer{
     }
     bool query(const common::Time& time, T & value){
 
+        if(buffer.size() < 3){
+            return false;
+        }
 
         if(time == buffer.back().time){
 
@@ -155,22 +158,32 @@ struct ValueStampedBuffer{
         }
 
         // first v > t
-        auto low_it = std::lower_bound(buffer.begin(),buffer.end(), time, [](auto & v, auto& t){
-            return v.time < t;
-        });
 
-        // first v < t
-        auto up_it = std::lower_bound(buffer.begin(),buffer.end(), time, [](auto & v, auto& t){
-            return v.time > t;
-        });
+        auto pred = [time](auto&x){return x.time < time;};
+        auto mid = std::partition (buffer.begin(),buffer.end(),pred);
 
 
-        if(low_it != buffer.end() && up_it != buffer.end()){
+//        auto it = std::stable_partition(buffer.begin(),buffer.end(), [time](auto& v) { return v.time > time; });
 
-           auto s1 =  low_it->time - up_it->time;
-            auto s2 =  time - up_it->time;
 
-            value = up_it->value + (up_it->value - low_it->value)*s2/s1;
+
+
+
+        if(mid!= buffer.end()){
+            auto low_it = std::prev(mid);
+            auto up_it = mid;
+
+            auto s1 =  common::ToMicroSeconds(up_it->time - low_it->time);
+            auto s2 =  common::ToMicroSeconds(time - low_it->time);
+
+//            std::cout << "interpolate, up: "  << std::distance(buffer.begin(), up_it)  << ", low:  " << std::distance(buffer.begin(), low_it) << std::endl;
+
+//            std::cout << "interpolate, value : " << up_it->value << ", " << low_it->value << std::endl;
+
+//            std::cout << "interpolate: time " << s1*1e-6 << ", " << s2*1e-6<< std::endl;
+
+
+            value = low_it->value + (up_it->value - low_it->value)*s2/s1;
 
             return true;
         }else{
@@ -203,6 +216,9 @@ struct ControllerConfig{
     float mount_y = 0.0;
     float forward_acc = 0.8;
     float rotate_vel = 0.5;
+
+    float max_forward_vel = 0.5;
+    float max_rotate_angle = 1.9;
 
     float actual_rot_angle = 0.0;
     float actual_forward_vel = 0.0;
@@ -256,7 +272,7 @@ struct ControllerConfig{
     bool angleCalib(){
 
         if(!use_rot_angle_abs){
-            is_rot_angle_calib = true;
+            rot_angle_abs_offset = 0.0;
             return true;
         }
         is_rot_angle_calib = !use_rot_angle_abs;
@@ -269,12 +285,16 @@ struct ControllerConfig{
         float angle, angle_abs;
         bool ok1 = angle_buffer.query(check_point,angle);
         bool ok2 = angle_abs_buffer.query(check_point,angle_abs);
+        PLOGD << "query angle: " << angle;
+        PLOGD << "query angle_abs: " << angle_abs;
+
 
         is_rot_angle_calib = ok1 && ok2;
         if(is_rot_angle_calib){
 
             rot_angle_abs_offset = angle_abs - angle;
         }
+        PLOGD << "query rot_angle_abs_offset: " << rot_angle_abs_offset;
 
         return is_rot_angle_calib;
     }
@@ -341,7 +361,10 @@ constexpr auto ControllerConfig_properties = std::make_tuple(
         common::property(&ControllerConfig::use_rot_angle_abs, "use_rot_angle_abs"),
         common::property(&ControllerConfig::forward_speed_k, "forward_speed_k"),
         common::property(&ControllerConfig::mount_x, "mount_x"),
-        common::property(&ControllerConfig::mount_y, "mount_y")
+        common::property(&ControllerConfig::mount_y, "mount_y"),
+        common::property(&ControllerConfig::max_forward_vel, "max_forward_vel"),
+        common::property(&ControllerConfig::max_rotate_angle, "max_rotate_angle")
+
 );
 void to_json(nlohmann::json& j, const ControllerConfig& object)
 {
@@ -515,19 +538,22 @@ int test_tec(int argc, char** argv) {
                | lyra::help(get_help)
                | lyra::opt( config_file, "config_file" )["-c"]["--config_file"]("config_file")
                | lyra::opt( enable_control)["-e"]["--enable_control"]("enable_control")
+               | lyra::opt( use_sim)["-S"]["--use_sim"]("use_sim")
                | lyra::opt(smooth_stop,"smooth_stop")["-s"]["--smooth_stop"]("smooth_stop")
 //               | lyra::opt(use_rot_angle_abs,"use_rot_angle_abs")["-a"]["--abs_rot"]("use_rot_angle_abs")
                | lyra::opt(cmd_vel_timeout_ms,"cmd_vel_timeout_ms")["-t"]["--cmdvel_timeout"]("cmd_vel_timeout_ms")
                | lyra::opt(feedback_timeout_ms,"feedback_timeout_ms")["-f"]["--feedback_timeout"]("feedback_timeout_ms")
                | lyra::opt(initialise_wait_s,"initialise_wait_s")["-i"]["--initialise_wait_s"]("initialise_wait_s")
-                 | lyra::opt(mqtt_server,"mqtt_server")["-M"]["--mqtt_server"]("mqtt_server")
-                   | lyra::opt(can_forward_file,"can_forward_file")["-T"]["--can_forward_file"]("can_forward_file")
+               | lyra::opt(mqtt_server,"mqtt_server")["-M"]["--mqtt_server"]("mqtt_server")
+               | lyra::opt(can_forward_file,"can_forward_file")["-T"]["--can_forward_file"]("can_forward_file")
+               | lyra::opt(forward_vel_acc,"forward_vel_acc")["-F"]["--forward_vel_acc"]("forward_vel_acc")
+               | lyra::opt(rotate_angle_vel,"rotate_angle_vel")["-R"]["--rotate_angle_vel"]("rotate_angle_vel")
 
-                 //---
-                 | lyra::group().sequential()
-                 | lyra::opt(enable_fix_command, "ON|OFF")["--command"]
-                 | lyra::arg(command_array, "command_array")
-                 //---
+               //---
+               | lyra::group().sequential()
+               | lyra::opt(enable_fix_command, "ON|OFF")["--command"]
+               | lyra::arg(command_array, "command_array")
+               //---
                | lyra::arg(command, "command")("The command, and arguments, to attempt to run.")
                ;
 
@@ -733,7 +759,7 @@ int test_tec(int argc, char** argv) {
 
     std::cout << "mqtt start done" << std::endl;
 
-    const int STATUS_NUM = 11;
+    const int STATUS_NUM = 14;
     const int FRAME_NUM = 60;
 
     common::Time record_start_time = common::FromUnixNow();
@@ -756,9 +782,11 @@ int test_tec(int argc, char** argv) {
 
 
     rosMessageManager.add_channel<common_message::Twist>("SUB:control_cmd_vel:10");
+    rosMessageManager.add_channel<common_message::Twist>("PUB:cmd_vel:10");
     rosMessageManager.add_channel<common_message::Odometry>("PUB:odom:200");
 
     std::vector<common_message::Twist> cmd_vel_msgs(10);
+    common_message::Twist send_cmd_vel;
     common_message::Odometry odom;
     odom.twist.twist.linear.z = 0.0f;
 
@@ -972,8 +1000,8 @@ int test_tec(int argc, char** argv) {
     auto control_wheel = [&](bool enable, float forward_vel_1, float rotate_angle_1, float forward_vel_2, float rotate_angle_2){
 
 
-        if(!enable_control){
-            PLOGD << "enable_control is not set";
+        if(!enable_control || use_sim){
+            PLOGD << "enable_control is not set, or use_sim is set";
             return ;
         }
         if(!is_all_alive || !is_all_initialised){
@@ -990,6 +1018,11 @@ int test_tec(int argc, char** argv) {
         PLOGD <<"control_wheel 1:[forward_vel, rotate_angle]: " << forward_vel_1 << ", " << rotate_angle_1;
         PLOGD <<"control_wheel 2:[forward_vel, rotate_angle]: " << forward_vel_2 << ", " << rotate_angle_2;
 
+        PLOGD <<"SteerConfigArray[0].use_rot_angle_abs: " << SteerConfigArray[0].use_rot_angle_abs;
+        PLOGD <<"SteerConfigArray[1].use_rot_angle_abs: " << SteerConfigArray[1].use_rot_angle_abs;
+
+        PLOGD <<"SteerConfigArray[0].rot_angle_abs_offset: " << SteerConfigArray[0].rot_angle_abs_offset;
+        PLOGD <<"SteerConfigArray[1].rot_angle_abs_offset: " << SteerConfigArray[1].rot_angle_abs_offset;
 
 
         *(int*)(&driver_command_msg_channel_1[0].data[0]) = forward_vel_1 / SteerConfigArray[0].forward_speed_k;
@@ -1112,7 +1145,7 @@ int test_tec(int argc, char** argv) {
     }
 
     // can forward
-    std::vector<std::vector<common_message::CanMessage>> can_channel_forward_msg(2);
+    std::vector<common_message::CanMessageArray> can_channel_forward_msg(2);
     std::vector<std::vector<kaco::Message>> can_channel_send_msg(2);
 
 
@@ -1128,10 +1161,10 @@ int test_tec(int argc, char** argv) {
 
 //        rosMessageManager.add_channel<common_message::Odometry>("PUB:odom:200");
         std::string sub_topic = absl::StrFormat("SUB:%s:100", c.sub_topic.c_str());
-        rosMessageManager.add_channel<std::vector<common_message::CanMessage>>(sub_topic.c_str());
+        rosMessageManager.add_channel<common_message::CanMessageArray>(sub_topic.c_str());
 
         std::string pub_topic = absl::StrFormat("PUB:%s:100", c.pub_topic.c_str());
-        rosMessageManager.add_channel<std::vector<common_message::CanMessage>>(pub_topic.c_str());
+        rosMessageManager.add_channel<common_message::CanMessageArray>(pub_topic.c_str());
 
 
 
@@ -1175,22 +1208,22 @@ int test_tec(int argc, char** argv) {
                 msg.is_error = false;
                 msg.dlc = message.len;
                 std::copy(std::begin(message.data), std::end(message.data), std::begin(msg.data));
-                can_channel_forward_msg[c.channel_id].push_back(msg);
+                can_channel_forward_msg[c.channel_id].messages.push_back(msg);
             }
 
         });
         auto can_message_sub_cb =[&c,&can_channel_send_msg](void* data){
-            std::vector<common_message::CanMessage> * data_ptr = static_cast<std::vector<common_message::CanMessage>*>(data);
+            common_message::CanMessageArray * data_ptr = static_cast<common_message::CanMessageArray*>(data);
 
             kaco::Message msg;
             PLOGD << "recv data" << std::endl;
 
-            for(size_t i = 0 ; i < data_ptr->size();i++){
-                msg.cob_id = data_ptr->at(i).id;
-                msg.rtr = data_ptr->at(i).is_rtr;
-                msg.ext = data_ptr->at(i).is_extended;
-                msg.len = data_ptr->at(i).dlc;
-                std::copy(std::begin(data_ptr->at(i).data), std::end(data_ptr->at(i).data), std::begin(msg.data));
+            for(size_t i = 0 ; i < data_ptr->messages.size();i++){
+                msg.cob_id = data_ptr->messages.at(i).id;
+                msg.rtr = data_ptr->messages.at(i).is_rtr;
+                msg.ext = data_ptr->messages.at(i).is_extended;
+                msg.len = data_ptr->messages.at(i).dlc;
+                std::copy(std::begin(data_ptr->messages.at(i).data), std::end(data_ptr->messages.at(i).data), std::begin(msg.data));
                 can_channel_send_msg[c.channel_id].push_back(msg);
             }
 
@@ -1210,12 +1243,12 @@ int test_tec(int argc, char** argv) {
             return true;
         },100*1000,2);
         taskManager.addTask([&rosMessageManager,&c,&can_channel_forward_msg]{
-            if(can_channel_forward_msg[c.channel_id].empty()){
+            if(can_channel_forward_msg[c.channel_id].messages.empty()){
                 return true;
             }
 
             rosMessageManager.send_message(c.pub_topic.c_str(),&can_channel_forward_msg[c.channel_id], 1, 0.1 );
-            can_channel_forward_msg[c.channel_id].clear();
+            can_channel_forward_msg[c.channel_id].messages.clear();
             return true;
         },100*1000,2);
 
@@ -1225,29 +1258,37 @@ int test_tec(int argc, char** argv) {
 
 
     //
-    control::SteerWheelBase wheel_1;
-    wheel_1.enable_rot = true;
-    wheel_1.mount_position_x = SteerConfigArray[0].mount_x;
-    wheel_1.mount_position_y = SteerConfigArray[0].mount_y;
+    std::vector<control::SteerWheelBase> wheels_array(SteerConfigArray.size());
+    for(size_t i = 0 ; i  < SteerConfigArray.size(); i++){
 
-    wheel_1.max_forward_acc = forward_vel_acc;
-    wheel_1.max_rot_vel = rotate_angle_vel;
+        wheels_array[i].enable_rot = true;
+        wheels_array[i].mount_position_x = SteerConfigArray[i].mount_x;
+        wheels_array[i].mount_position_y = SteerConfigArray[i].mount_y;
+
+        wheels_array[i].max_forward_acc = forward_vel_acc;
+        wheels_array[i].max_rot_vel = rotate_angle_vel;
+        wheels_array[i].max_forward_vel = SteerConfigArray[i].max_forward_vel;
+        wheels_array[i].max_rot_angle = SteerConfigArray[i].max_rotate_angle;
+
+    }
 
 
-    control::SteerWheelBase wheel_2;
-    wheel_2.enable_rot = true;
-    wheel_2.mount_position_x = SteerConfigArray[1].mount_x;
-    wheel_2.mount_position_y = SteerConfigArray[1].mount_y;
-
-    wheel_2.max_forward_acc = forward_vel_acc;
-    wheel_2.max_rot_vel = rotate_angle_vel;
-
-    controller.set_wheel(wheel_1,wheel_2);
+    controller.set_wheel(wheels_array[0],wheels_array[1]);
 
     controller.smooth_stop = smooth_stop;
 
+    control::SmoothSimulator smoothSimulator;
+    smoothSimulator.set_wheel(wheels_array[0],wheels_array[1]);
 
 
+
+    common_message::TransformStamped send_map_odom_tf, send_odom_base_tf;
+    send_map_odom_tf.base_frame.assign("map");
+    send_map_odom_tf.target_frame.assign("odom");
+    send_odom_base_tf.base_frame.assign("odom");
+    send_odom_base_tf.target_frame.assign("base_link");
+
+    Eigen::Transform<double,3,Eigen::Isometry> odom_base_transform;
 
     if(!use_sim){
         if (!device.start(busname, baudrate)) {
@@ -1325,23 +1366,53 @@ int test_tec(int argc, char** argv) {
             return true;
         }, 10*1000,1);
 
-
+        // rot
+        taskManager.addTask([&]{
+            is_rot_sensor_ready = true;
+            for(size_t i = 0 ; i < SteerConfigArray.size();i++){
+                SteerConfigArray[i].angleCalib();
+                is_rot_sensor_ready = is_rot_sensor_ready && SteerConfigArray[i].isAngleCalib();
+            }
+            return true;
+        }, 500*1000,1);
     }else{
 
         is_all_alive = true;
         is_all_initialised = true;
         is_any_fault = false;
+        is_rot_sensor_ready = true;
+        taskManager.addTask([&]{
+            is_all_alive = true;
+            is_all_initialised = true;
+            is_any_fault = false;
+            is_rot_sensor_ready = true;
+
+            smoothSimulator.updateState(controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle(),
+                                        controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle());
+
+
+            for(int i = 0; i < CONTROLLER_NUM;i++){
+
+                SteerConfigArray[i].actual_forward_vel = smoothSimulator.m_steer_wheel[i].actual_forward_vel  ;
+                SteerConfigArray[i].actual_rot_abs_angle = smoothSimulator.m_steer_wheel[i].actual_rot_angle;
+
+            }
+
+            send_map_odom_tf.time = common::FromUnixNow();
+            send_odom_base_tf.time = common::FromUnixNow();
+
+            send_map_odom_tf.transform = transform::createSe3<double>(0.0,0.0,0.0,0.0,0.0,0.0);
+            send_odom_base_tf.transform = odom_base_transform;
+
+            rosMessageManager.send_tf(send_map_odom_tf);
+            rosMessageManager.send_tf(send_odom_base_tf);
+
+            return true;
+        },10*1000,0);
 
     }
 
-    // rot
-    taskManager.addTask([&]{
-        is_rot_sensor_ready = true;
-        for(size_t i = 0 ; i < SteerConfigArray.size();i++){
-            is_rot_sensor_ready = SteerConfigArray[i].isAngleCalib();
-        }
-        return true;
-    });
+
 
 
     // odom
@@ -1369,11 +1440,27 @@ int test_tec(int argc, char** argv) {
 
 
             const transform::Transform2d& robot_pose = controller.getPosition();
-            odom.pose.pose.position.x = robot_pose.x();
-            odom.pose.pose.position.y = robot_pose.y();
-            odom.pose.pose.position.z = 0.0;
+//            odom.pose.pose.position.x = robot_pose.x();
+//            odom.pose.pose.position.y = robot_pose.y();
+//            odom.pose.pose.position.z = 0.0;
 
-            math::yaw_to_quaternion(robot_pose.yaw(), odom.pose.pose.orientation.x,odom.pose.pose.orientation.y,odom.pose.pose.orientation.z,odom.pose.pose.orientation.w );
+
+
+
+            odom_base_transform = transform::createSe3<double>(robot_pose.x(),robot_pose.y(),0.0f,0.0f,0.0f,robot_pose.yaw() );
+
+            double tx,ty,tz,qw,qx,qy,qz;
+//            transform::extractSe3<double>(pose,odom.pose.pose.position.x, odom.pose.pose.position.y, odom.pose.pose.position.z, odom.pose.pose.orientation.w, odom.pose.pose.orientation.x,odom.pose.pose.orientation.y,odom.pose.pose.orientation.z );
+
+            transform::extractSe3<double>(odom_base_transform,tx,ty,tz,qw,qx,qy,qz );
+
+            odom.pose.pose.position.x = tx;
+            odom.pose.pose.position.y = ty;
+            odom.pose.pose.position.z = tz;
+            odom.pose.pose.orientation.w = qw;
+            odom.pose.pose.orientation.x = qx;
+            odom.pose.pose.orientation.y = qy;
+            odom.pose.pose.orientation.z = qz;
 
             odom.twist.twist.linear.x = controller.getActualForwardVel() * std::cos(controller.getActualForwardAngle());
             odom.twist.twist.linear.y = controller.getActualForwardVel() * std::sin(controller.getActualForwardAngle());
@@ -1403,6 +1490,9 @@ int test_tec(int argc, char** argv) {
                     mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 8 ] = controller.m_steer_wheel[1].getCommandRotateAngle();
                     mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 9 ] = controller.m_steer_wheel[1].actual_rot_angle;
                     mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 10 ] = controller.m_steer_wheel[1].steer_constrain_vel;
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 11 ] = recv_cmd_vel_msg.linear.x;
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 12 ] = recv_cmd_vel_msg.linear.y;
+                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 13 ] = recv_cmd_vel_msg.angular.z;
 
                 }
                 mqtt_msg_status_cnt++;

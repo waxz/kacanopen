@@ -346,5 +346,6 @@ namespace message{
 
     template long MqttMessageManager::add_channel<std::string>(const char *);
     template long MqttMessageManager::add_channel<common_message::Twist>(const char *);
+    template long MqttMessageManager::add_channel<common_message::Path>(const char *);
 
 }

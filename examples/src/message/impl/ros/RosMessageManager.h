@@ -38,7 +38,7 @@ namespace message{
         long add_channel( const char *arg);
 
         long recv_tf(common_message::TransformStamped & data, float timeout );
-        long send_tf(common_message::TransformStamped & data);
+        long send_tf(const common_message::TransformStamped & data);
 
     };
 
