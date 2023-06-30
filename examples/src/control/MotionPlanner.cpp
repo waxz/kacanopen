@@ -64,7 +64,8 @@ namespace control{
         float predict_error_dist = std::sqrt((map_base_predict.x() - map_base.x())*(map_base_predict.x() - map_base.x()) + (map_base_predict.y() - map_base.y())*(map_base_predict.y() - map_base.y()) );
         float predict_error_angle = std::abs(map_base_predict.yaw() - angle_normalise(map_base.yaw(), map_base_predict.yaw()));
 
-        need_update = predict_error_dist > 0.03 || predict_error_angle > 0.05;
+
+        need_update = predict_error_dist > m_planner_config.stable_pose_dist_tolerance || predict_error_angle > m_planner_config.stable_pose_angle_tolerance;
 
         if(need_update || !m_stable_pose_get){
 
@@ -144,9 +145,13 @@ namespace control{
 
     void MotionPlanner::requestPath(const common_message::Path & path) {
 
-        if(path.poses.size()<2){
+        if(path.poses.empty()){
             std::cout << "cancel goal , path poses size : " << path.poses.size()  << std::endl;
             stop();
+            return;
+        }
+        if(path.poses.size() == 1){
+            requestGoal(path.poses.front());
             return;
         }
 
@@ -312,8 +317,8 @@ namespace control{
             float angle_diff = angle_normalise(m_global_path.value[0].yaw(), m_actual_pose.value.yaw()) - m_actual_pose.value.yaw();
 
             interpolate_time = common::FromUnixNow();
-            interpolate_time_step_0 = common::FromUnixNow();
-            interpolate_time_step_1 = common::FromUnixNow();
+            interpolate_time_step_0 = interpolate_time;
+            interpolate_time_step_1 = interpolate_time;
             if(std::abs(angle_diff )< m_planner_config.first_rotate_angle_tolerance){
 
                 m_task_state = TaskState::running_adjust_prepare;
@@ -335,8 +340,8 @@ namespace control{
             if(ok){
                 float angle_diff = angle_normalise(m_global_path.value[0].yaw(), m_actual_pose.value.yaw()) - m_actual_pose.value.yaw();
                 interpolate_time = common::FromUnixNow();
-                interpolate_time_step_0 = common::FromUnixNow();
-                interpolate_time_step_1 = common::FromUnixNow();
+                interpolate_time_step_0 = interpolate_time;
+                interpolate_time_step_1 = interpolate_time;
                 if(std::abs(angle_diff )< m_planner_config.first_rotate_angle_tolerance){
 
                     m_task_state = TaskState::running_adjust_prepare;
@@ -356,6 +361,9 @@ namespace control{
 
             bool ok = prepare();
             if(ok){
+                interpolate_time = common::FromUnixNow();
+                interpolate_time_step_0 = interpolate_time;
+                interpolate_time_step_1 = interpolate_time;
                 m_task_state = TaskState::running_pursuit_path;
             }
         }
@@ -364,6 +372,9 @@ namespace control{
             std::cout << "running_pursuit_path" << std::endl;
             bool ok = pursuit_path();
             if(ok){
+                interpolate_time = common::FromUnixNow();
+                interpolate_time_step_0 = interpolate_time;
+                interpolate_time_step_1 = interpolate_time;
                 m_task_state = TaskState::running_pursuit_goal;
             }
         }
@@ -372,6 +383,9 @@ namespace control{
             std::cout << "running_pursuit_goal" << std::endl;
             bool ok = pursuit_goal();
             if(ok){
+                interpolate_time = common::FromUnixNow();
+                interpolate_time_step_0 = interpolate_time;
+                interpolate_time_step_1 = interpolate_time;
                 reset();
                 m_task_state = TaskState::finished;
             }
@@ -437,29 +451,25 @@ namespace control{
 
 
         forward_vel_1 = 0.0f;
-        rotate_angle_1 = m_wheel_state.value[1];
+        rotate_angle_1 = 0.0f;
 
         forward_vel_2 = 0.0f;
-        rotate_angle_2 = m_wheel_state.value[3];
+        rotate_angle_2 = 0.0f;
 
         PLOGD << "m_wheel_state.value[1]: " << m_wheel_state.value[1];
         PLOGD << "m_wheel_state.value[3]: " << m_wheel_state.value[3];
 
-        PLOGD << "m_start_wheel_angle: " << m_start_wheel_angle;
         //todo: remove spark point
-        return true;
+//        return true;
 
         float actual_angular_z = m_actual_odom.value.twist.twist.angular.z;
 
 
-        rotate_angle_1 = m_start_wheel_angle;
-        rotate_angle_2 = m_start_wheel_angle;
 
         std::cout <<"actual_angular_z: " << actual_angular_z << std::endl;
 
-        if(std::abs(actual_angular_z) < 1e-3&& std::abs(m_wheel_state.value[1] - m_start_wheel_angle ) < 0.01&&std::abs(m_wheel_state.value[3] - m_start_wheel_angle ) < 0.01   &&  std::abs(m_wheel_state.value[0]) < 0.01 &&  std::abs(m_wheel_state.value[2]) < 0.01 ){
-//            forward_vel_1  = 0.1;
-//            forward_vel_2  = 0.1;
+        if(std::abs(actual_angular_z) < 1e-3&& std::abs(m_wheel_state.value[1] ) < 0.01&&std::abs(m_wheel_state.value[3] ) < 0.01   &&  std::abs(m_wheel_state.value[0]) < 0.01 &&  std::abs(m_wheel_state.value[2]) < 0.01 ){
+
 
             return true;
         }else{
@@ -497,10 +507,10 @@ namespace control{
         float wheel_start_yaw_base = path_start_yaw_map - base_start_yaw_map;
 
         wheel_start_yaw_base = angle_normalise_zero(wheel_start_yaw_base);
-        float init_wheel_yaw_base[2] = {wheel_start_yaw_base,wheel_start_yaw_base};
-        init_wheel_yaw_base[1] = (wheel_start_yaw_base > 0.0) ? wheel_start_yaw_base- M_PIf32 :wheel_start_yaw_base + M_PIf32;
-        init_wheel_yaw_base[0] = angle_normalise_zero(init_wheel_yaw_base[0]);
-        init_wheel_yaw_base[1] = angle_normalise_zero(init_wheel_yaw_base[1]);
+        float init_wheel_yaw_base[2] = {0.0,-M_PIf32};
+//        init_wheel_yaw_base[1] = (wheel_start_yaw_base > 0.0) ? wheel_start_yaw_base- M_PIf32 :wheel_start_yaw_base + M_PIf32;
+//        init_wheel_yaw_base[0] = angle_normalise_zero(init_wheel_yaw_base[0]);
+//        init_wheel_yaw_base[1] = angle_normalise_zero(init_wheel_yaw_base[1]);
 
         bool init_wheel_yaw_ok[2] = {true, true};
 
@@ -515,11 +525,17 @@ namespace control{
 
             float base_yaw = m_global_path.value[i].yaw();
 
-            init_wheel_yaw_ok[0] = init_wheel_yaw_ok[0] && std::abs(init_wheel_yaw_base[0] + path_yaw - base_yaw) < m_max_wheel_rotate_angle;
-            init_wheel_yaw_ok[1] = init_wheel_yaw_ok[1] && std::abs(init_wheel_yaw_base[1] + path_yaw - base_yaw) < m_max_wheel_rotate_angle;
+            init_wheel_yaw_ok[0] = init_wheel_yaw_ok[0] && std::abs(angle_normalise_zero(init_wheel_yaw_base[0] + path_yaw - base_yaw)) < m_max_wheel_rotate_angle;
+            init_wheel_yaw_ok[1] = init_wheel_yaw_ok[1] && std::abs(angle_normalise_zero(init_wheel_yaw_base[1] + path_yaw - base_yaw)) < m_max_wheel_rotate_angle;
         }
+        PLOGD << "init_wheel_yaw_ok: " << init_wheel_yaw_ok[0] << ", " << init_wheel_yaw_ok[1];
 
-        if(init_wheel_yaw_ok[0] || init_wheel_yaw_ok[1] ){
+        if(init_wheel_yaw_ok[0] && init_wheel_yaw_ok[1]){
+            m_start_wheel_angle = 0.0f;
+            PLOGD << "m_start_wheel_angle: " << m_start_wheel_angle;
+            return true;
+        }
+        else if(init_wheel_yaw_ok[0] || init_wheel_yaw_ok[1] ){
 
             float angle_diff[2] = {100.0f,100.0f};
 
@@ -529,7 +545,8 @@ namespace control{
             }
 
 
-            m_start_wheel_angle = angle_diff[0] < angle_diff[1] ? init_wheel_yaw_base[0] : init_wheel_yaw_base[1];
+            m_start_wheel_angle = angle_diff[0] < angle_diff[1] ? M_PI_2f32 : -M_PI_2f32;
+            PLOGD << "m_start_wheel_angle: " << m_start_wheel_angle;
 
             return true;
         }else{
@@ -540,7 +557,291 @@ namespace control{
         return false;
     }
 
-    bool DoubleSteerMotionPlanner::createLocalPath() {
+//    bool DoubleSteerMotionPlanner::createLocalPath() {
+//
+//
+//        return createLocalPath_v2();
+//    }
+//
+    bool DoubleSteerMotionPlanner::createLocalPath(){
+
+        // time
+        float update_s  = 0.01;
+        common::Time now = common::FromUnixNow();
+        interpolate_time_step_1 = now;
+
+        update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time)*1e-6;
+
+        float relative_update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time_step_0)*1e-6;
+
+        interpolate_time_step_0 = now;
+
+        //time
+
+
+
+
+
+        size_t pose_num = m_global_path.value.size();
+
+        auto & local_path = m_local_path.value;
+        auto & global_path = m_global_path.value;
+
+        auto& actual_pose = m_actual_pose.value;
+        bool last_local_path_valid = !local_path.empty();
+        bool last_local_path_goal_reach = false;
+
+        local_path.clear();
+
+        m_local_target.time = common::FromUnixNow();
+
+
+        transform::Transform2d odom_twist(m_actual_odom.value.twist.twist.linear.x,m_actual_odom.value.twist.twist.linear.y);
+        odom_twist = m_map_odom_record*odom_twist;
+        float odom_twist_vel = std::sqrt(odom_twist.x()*odom_twist.x() + odom_twist.y()*odom_twist.y());
+
+
+        float odom_forward_dist = odom_twist_vel * relative_update_s;
+
+        /*
+         slide window
+
+         ------PS---------------PE------------------
+
+
+       Path: P1 P2 P3 P4 P5 P6 P7 P8 P9 P10 P11
+
+             R
+
+
+        R: robot
+        Path: global path
+        P: node on Path
+        PS: window start
+        PE: window end
+
+        if dist_R_to_PS < thresh, push PS forward
+
+
+         m_path_node_id_interpolate represent PS between Path node
+         */
+        float slider_window_start_max_dist = 0.4;
+
+        if(pose_num == 1){
+            m_local_target.value = global_path.back();
+            return true;
+        }
+
+
+
+
+        PLOGD << "m_path_node_id: " << m_path_node_id;
+        // deal with steer angle limitation
+
+        if(m_path_node_id == 0){
+            const auto& PS = global_path[m_path_node_id];
+            size_t next_id = m_path_node_id+1;
+            for(size_t i =m_path_node_id+1; i<pose_num-1; i++ ){
+                if(transform::diff2(global_path[m_path_node_id+1],global_path[m_path_node_id+1]) > 0.01){
+                    next_id = i;
+                    break;
+                }
+            }
+            PLOGD << "next_id: " << next_id;
+
+            const auto& PS_1 = global_path[next_id];
+            float path_yaw_map = std::atan2(PS_1.y() - PS.y(),PS_1.x() - PS.x() );
+
+            float dist_base_PS = std::sqrt(transform::diff2(PS, actual_pose));
+            float dist_PS_1 = std::sqrt(transform::diff2(PS, PS_1));
+
+
+            m_local_target.value.set(actual_pose.x() + 0.1*std::cos(path_yaw_map),actual_pose.y() + 0.1*std::sin(path_yaw_map), PS.yaw()) ;
+
+            PLOGD << "actual_pose: " << actual_pose;
+            PLOGD << "PS: " << PS;
+            PLOGD << "PS_1: " << PS_1;
+
+            PLOGD << "dist_PS_1: " << dist_PS_1;
+            PLOGD << "path_yaw_map: " << path_yaw_map;
+            PLOGD << "m_local_target.value: " << m_local_target.value;
+
+            transform::Transform2d adjust_point(m_local_target.value.x(),m_local_target.value.y(), path_yaw_map);
+            transform::Transform2d pose_in_adjust_point;
+
+            if(odom_twist_vel > 0.02){
+
+                bool find_valid_pose = false;
+                size_t choose_id = m_path_node_id;
+                for(size_t i = m_path_node_id + 1; i < pose_num;i++){
+                    const auto& P = global_path[i];
+                    pose_in_adjust_point = adjust_point.inverse() *P;
+
+                    if(pose_in_adjust_point.x() > 0.0){
+                        find_valid_pose = true;
+                        choose_id = i;
+                        break;
+                    }
+                }
+                PLOGD << "find_valid_pose: " << find_valid_pose;
+
+                if(find_valid_pose){
+                    m_path_node_id = choose_id;
+                }
+                PLOGD << "m_path_node_id: " << m_path_node_id;
+
+                return find_valid_pose;
+            }else{
+                PLOGD << "base is not moving!"  ;
+
+            }
+            return true;
+        }
+        // deal with steer angle limitation
+
+
+
+        PLOGD << "m_path_node_id: " << m_path_node_id;
+
+        if(m_path_node_id < pose_num-1){
+            const auto& PS = global_path[m_path_node_id];
+
+            size_t next_id = m_path_node_id+1;
+            for(size_t i =m_path_node_id+1; i<pose_num-1; i++ ){
+                if(transform::diff2(global_path[m_path_node_id+1],global_path[m_path_node_id+1]) > 0.01){
+                    next_id = i;
+                    break;
+                }
+            }
+            PLOGD << "next_id: " << next_id;
+
+            const auto& PS_1 = global_path[next_id];
+
+            size_t PE_id = std::min(m_path_node_id + 5,pose_num-1);
+            const auto& PE = global_path[PE_id];
+
+
+
+            float path_yaw_map = std::atan2(PS_1.y() - PS.y(),PS_1.x() - PS.x() );
+
+            float path_yaw_map_2 = std::atan2(PE.y() - PS.y(),PE.x() - PS.x() );
+
+            float base_to_path_yaw_map = std::atan2(PS.y() - actual_pose.y(), PS.x() - actual_pose.x() );
+
+            transform::Transform2d adjust_point(actual_pose.x(),actual_pose.y(), path_yaw_map);
+            transform::Transform2d pose_in_adjust_point;
+
+            pose_in_adjust_point = adjust_point.inverse() *PS;
+
+
+
+
+            float dist_base_PS = std::sqrt(transform::diff2(PS, actual_pose));
+            float dist_PS_1 = std::sqrt(transform::diff2(PS, PS_1));
+
+
+
+            float relative_ratio = odom_forward_dist/dist_PS_1;
+
+            if(dist_base_PS < slider_window_start_max_dist
+            && (
+
+                    dist_PS_1 < 1e-3
+                    || pose_in_adjust_point.x() < 0.05
+                    ||odom_forward_dist > dist_PS_1
+                    || (  m_path_node_id_interpolate += odom_forward_dist/dist_PS_1 , m_path_node_id_interpolate >= m_path_node_id + 1)
+
+                    )
+            ){
+
+                m_path_node_id = m_path_node_id +1;
+                m_path_node_id_interpolate = m_path_node_id;
+            }
+
+        }
+
+
+
+
+
+
+        {
+            float min_track_dist= 0.1*0.1;
+
+            transform::Transform2d track_pose = actual_pose;
+
+
+            size_t converge_id = m_path_node_id;
+            PLOGD << "add local_path";
+            PLOGD << "m_path_node_id: " << m_path_node_id;
+
+            for(size_t i = m_path_node_id ; i < pose_num-1 ;i++){
+
+#if 0
+                for(size_t j = i; j < pose_num-1;j++){
+
+                    float track_dist = (global_path[i].x() - track_pose.x())*(global_path[i].x() - track_pose.x()) + (global_path[i].y() - track_pose.y())*(global_path[i].y() - track_pose.y());
+                    if(track_dist > min_track_dist){
+                        break;
+                    }
+                    i = j;
+                }
+#endif
+                track_pose = transform::interpolate(m_planner_config.pursuit_path_interpolate_step, track_pose,global_path[i]);
+                PLOGD << "add node: " << i;
+
+                local_path.push_back(track_pose);
+
+                float path_yaw_map = std::atan2(global_path[i+1].y() - global_path[i].y(),global_path[i+1].x() - global_path[i].x() );
+                float base_to_path_yaw_map = std::atan2(global_path[i].y() - track_pose.y(),global_path[i].x() - track_pose.x() );
+                path_yaw_map = angle_normalise(path_yaw_map, base_to_path_yaw_map);
+                float angle_diff = path_yaw_map - base_to_path_yaw_map;
+                converge_id = i;
+                if( std::abs(angle_diff) < m_planner_config.pursuit_path_angle_converge ){
+                    break;
+                }
+            }
+
+
+
+            bool plan_ok = !local_path.empty();
+            if(plan_ok){
+#if 0
+
+                float local_goal_x = 0.0;
+                float local_goal_y = 0.0;
+                float local_goal_yaw_start = local_path.front().yaw();
+                float local_goal_yaw = 0.0;
+
+                for(size_t i = 0 ; i < local_path.size() ;i++){
+                    local_goal_x += local_path[i].x();
+                    local_goal_y += local_path[i].y();
+                    local_goal_yaw += angle_normalise(local_path[i].yaw() ,local_goal_yaw_start ) ;
+                }
+
+                local_goal_x /= local_path.size();
+                local_goal_y /= local_path.size();
+                local_goal_yaw /= local_path.size();
+
+                m_local_target.value.set(local_goal_x,local_goal_y,local_goal_yaw);
+#endif
+
+                m_local_target.value = local_path.front();
+            }
+#if 0
+
+            for(size_t i = converge_id; i < pose_num;i++){
+                local_path.push_back(global_path[i]);
+            }
+#endif
+            return plan_ok;
+
+        }
+
+
+        return false;
+    }
+    bool DoubleSteerMotionPlanner::createLocalPath_v1()  {
 
         size_t pose_num = m_global_path.value.size();
 
@@ -550,12 +851,164 @@ namespace control{
         auto& actual_pose = m_actual_pose.value;
         local_path.clear();
 
+        m_local_target.time = common::FromUnixNow();
+
+        {
+            float min_track_dist= 0.1*0.1;
+            float min_split_dist= 0.01*0.01;
+            float max_track_dist= 0.3*0.3;
+
+            float max_base_dist= 0.5*0.5;
+
+
+            if(m_path_node_id == 0){
+                size_t choose_id = m_path_node_id;
+
+                for(size_t i = m_path_node_id ; i < pose_num ;i++){
+
+                    float base_dist = (global_path[i].x() - actual_pose.x())*(global_path[i].x() - actual_pose.x()) + (global_path[i].y() - actual_pose.y())*(global_path[i].y() - actual_pose.y());
+                    if(base_dist > min_track_dist){
+                        choose_id = i;
+                        break;
+                    }
+                }
+                m_path_node_id = std::max(choose_id , m_path_node_id);
+
+            }else{
+#if 1
+                size_t choose_id = m_path_node_id;
+                float best_base_dist = 1000.0;
+                for(size_t i = m_path_node_id ; i < pose_num ;i++){
+
+                    float base_dist = (global_path[i].x() - actual_pose.x())*(global_path[i].x() - actual_pose.x()) + (global_path[i].y() - actual_pose.y())*(global_path[i].y() - actual_pose.y());
+                    float track_dist = (global_path[i].x() - global_path[m_path_node_id].x())*(global_path[i].x() - global_path[m_path_node_id].x()) + (global_path[i].y() - global_path[m_path_node_id].y())*(global_path[i].y() - global_path[m_path_node_id].y());
+
+                    if(base_dist < best_base_dist){
+                        choose_id = i;
+                        best_base_dist = base_dist;
+                    }
+                    if(base_dist > max_base_dist ){
+                        break;
+                    }
+                }
+                m_path_node_id = std::max(choose_id , m_path_node_id);
+
+#endif
+            }
+
+
+
+            size_t converge_id = m_path_node_id;
+
+            transform::Transform2d track_pose = actual_pose;
+
+            for(size_t i = m_path_node_id ; i < pose_num-1 ;i++){
+
+                float dist = (global_path[i].x() - global_path[i+1].x())*(global_path[i].x() - global_path[i+1].x()) + ( global_path[i].y() - global_path[i+1].y())*(global_path[i].y() - global_path[i+1].y());
+
+                if(dist < min_split_dist){
+                    continue;
+                }
+
+
+                for(size_t j = i; j < pose_num-1;j++){
+
+                    float track_dist = (global_path[i].x() - track_pose.x())*(global_path[i].x() - track_pose.x()) + (global_path[i].y() - track_pose.y())*(global_path[i].y() - track_pose.y());
+                    if(track_dist > min_track_dist){
+                        break;
+                    }
+                    i = j;
+                }
+                float base_dist = (global_path[i].x() - actual_pose.x())*(global_path[i].x() - actual_pose.x()) + (global_path[i].y() - actual_pose.y())*(global_path[i].y() - actual_pose.y());
+
+
+                track_pose = transform::interpolate(m_planner_config.pursuit_path_interpolate_step, track_pose,global_path[i]);
+                PLOGD << "add node: " << i;
+
+                local_path.push_back(track_pose);
+
+                float path_yaw_map = std::atan2(global_path[i+1].y() - global_path[i].y(),global_path[i+1].x() - global_path[i].x() );
+                float base_to_path_yaw_map = std::atan2(global_path[i].y() - track_pose.y(),global_path[i].x() - track_pose.x() );
+                path_yaw_map = angle_normalise(path_yaw_map, base_to_path_yaw_map);
+                float angle_diff = path_yaw_map - base_to_path_yaw_map;
+                converge_id = i;
+
+                if(
+                        //std::abs(angle_diff) < m_planner_config.pursuit_path_angle_converge
+//                ||
+                base_dist > max_track_dist
+                ){
+                    break;
+                }
+            }
+
+            m_path_node_id = std::max(converge_id, m_path_node_id) ;
+
+
+            bool plan_ok = !local_path.empty();
+
+            if(plan_ok){
+
+                float local_goal_x = 0.0;
+                float local_goal_y = 0.0;
+                float local_goal_yaw_start = local_path.front().yaw();
+                float local_goal_yaw = 0.0;
+
+                float local_goal_cnt = 0.0;
+                for(size_t i = 0 ; i < local_path.size() ;i++){
+                    local_goal_x += local_path[i].x();
+                    local_goal_y += local_path[i].y();
+                    local_goal_yaw += angle_normalise(local_path[i].yaw() ,local_goal_yaw_start ) ;
+                }
+
+                local_goal_x /= local_path.size();
+                local_goal_y /= local_path.size();
+                local_goal_yaw /= local_path.size();
+
+                m_local_target.value.set(local_goal_x,local_goal_y,local_goal_yaw);
+                m_local_target.value = local_path.front();
+
+            }
+
+            return plan_ok;
+        }
+
+
+
+
+        return false;
+        //
+
 //        local_path.push_back(actual_pose);
+        float min_track_dist= 0.2*0.2;
 
         {
 
             size_t choose_id = m_path_node_id;
-            for(size_t i = m_path_node_id ; i < pose_num-1; i++){
+            float base_to_path_dist =  0.1;
+
+            float min_predict_dist = 0.1;
+            for(size_t i = m_path_node_id -1 ; i < pose_num-1; i++){
+
+                float track_dist = (global_path[i].x() - global_path[i+1].x())*(global_path[i].x() - global_path[i+1].x()) + ( global_path[i].y() - global_path[i+1].y())*(global_path[i].y() - global_path[i+1].y());
+
+
+                if(track_dist < 0.001){
+                    choose_id = i;
+                    continue;
+                }
+
+                float  dist = std::sqrt((global_path[i].y() - actual_pose.y())*(global_path[i].y() - actual_pose.y()) + (global_path[i].x() - actual_pose.x())*(global_path[i].x() - actual_pose.x()) );
+
+                if( //(m_path_node_id == 0) &&
+                (dist < base_to_path_dist ||dist <  min_predict_dist) ){
+                    if(i == m_path_node_id){
+                        base_to_path_dist = dist;
+                    }
+                    choose_id = i;
+
+                    continue;
+                }
 
                 float path_yaw_map = std::atan2(global_path[i+1].y() - global_path[i].y(),global_path[i+1].x() - global_path[i].x() );
                 float base_to_path_yaw_map = std::atan2(global_path[i].y() - actual_pose.y(),global_path[i].x() - actual_pose.x() );
@@ -563,34 +1016,37 @@ namespace control{
                 float angle_diff = path_yaw_map - base_to_path_yaw_map;
 
 
-
-                if(std::abs(angle_diff) < M_PI_2f32){
+                if(std::abs(angle_diff) < M_PI_2f32 ){
                     choose_id = i;
                     break;
                 }
 
             }
-            m_path_node_id = choose_id;
+            m_path_node_id = std::max(choose_id, m_path_node_id) ;
 
         }
 
         transform::Transform2d track_pose = actual_pose;
 
-        float min_track_dist= 0.2*0.2;
 
         size_t converge_id = m_path_node_id;
+        PLOGD << "add local_path";
+        PLOGD << "m_path_node_id: " << m_path_node_id;
+
         for(size_t i = m_path_node_id ; i < pose_num-1 ;i++){
 
 
             for(size_t j = i; j < pose_num-1;j++){
 
-                float track_dist = (track_pose,global_path[i].x() - track_pose.x())*(track_pose,global_path[i].x() - track_pose.x()) + (track_pose,global_path[i].y() - track_pose.y())*(track_pose,global_path[i].y() - track_pose.y());
+                float track_dist = (global_path[i].x() - track_pose.x())*(global_path[i].x() - track_pose.x()) + (global_path[i].y() - track_pose.y())*(global_path[i].y() - track_pose.y());
                 if(track_dist > min_track_dist){
                     break;
                 }
                 i = j;
             }
             track_pose = transform::interpolate(m_planner_config.pursuit_path_interpolate_step, track_pose,global_path[i]);
+            PLOGD << "add node: " << i;
+
             local_path.push_back(track_pose);
 
             float path_yaw_map = std::atan2(global_path[i+1].y() - global_path[i].y(),global_path[i+1].x() - global_path[i].x() );
@@ -602,6 +1058,7 @@ namespace control{
                 break;
             }
         }
+
 
         for(size_t i = converge_id; i < pose_num;i++){
             local_path.push_back(global_path[i]);
@@ -628,6 +1085,8 @@ namespace control{
 
         bool local_path_ok = createLocalPath();
 
+        PLOGD << "createLocalPath: " << local_path_ok;
+
         if(!local_path_ok){
 
             command_linear_x = 0.0;
@@ -643,7 +1102,7 @@ namespace control{
         // base angle change
         // forward dist
 
-        transform::Transform2d& target_pose = local_path.front();
+        transform::Transform2d target_pose = m_local_target.value;
 
         float target_yaw_map = target_pose.yaw();
         float base_to_target_yaw_map = std::atan2(target_pose.y() - actual_pose.y(),target_pose.x() - actual_pose.x() );
@@ -702,7 +1161,47 @@ namespace control{
 
 
 
-        bool local_path_ok = createLocalPath();
+        bool local_path_ok  = true;
+
+
+
+
+        // predict future
+        // wheel angle change
+        // base angle change
+        // forward dist
+
+        transform::Transform2d target_pose;
+
+        // reach goal range
+
+        float goal_forward_vel = m_planner_config.pursuit_goal_forward_vel;
+        float goal_angle_pid_p = m_planner_config.pursuit_goal_angle_pid_p;
+
+        float goal_forward_vel_pid_p = m_planner_config.pursuit_goal_forward_vel_pid_p;
+        float goal_forward_vel_min = m_planner_config.pursuit_goal_forward_vel_min;
+        float goal_forward_vel_max = m_planner_config.pursuit_goal_forward_vel_max;
+
+        float dist_to_goal = std::sqrt((actual_pose.x() - global_path.back().x())*(actual_pose.x() - global_path.back().x()) + (actual_pose.y() - global_path.back().y())*(actual_pose.y() - global_path.back().y()) );
+        if(dist_to_goal < m_planner_config.pursuit_direct_goal_dist){
+            target_pose = global_path.back();
+        }else{
+            local_path_ok = createLocalPath();
+            PLOGD << "createLocalPath: " << local_path_ok;
+
+            target_pose= m_local_target.value;
+
+        }
+        if(dist_to_goal < m_planner_config.pursuit_final_goal_dist){
+            goal_forward_vel = m_planner_config.pursuit_goal_final_forward_vel;
+            goal_angle_pid_p = m_planner_config.pursuit_goal_final_angle_pid_p;
+
+
+            goal_forward_vel_pid_p = m_planner_config.pursuit_goal_final_forward_vel_pid_p;
+            goal_forward_vel_min = m_planner_config.pursuit_goal_final_forward_vel_min;
+            goal_forward_vel_max = m_planner_config.pursuit_goal_final_forward_vel_max;
+
+        }
 
         if(!local_path_ok){
 
@@ -713,31 +1212,6 @@ namespace control{
             return false;
 
         }
-
-        // predict future
-        // wheel angle change
-        // base angle change
-        // forward dist
-
-        transform::Transform2d target_pose = local_path.front();
-
-
-        // reach goal range
-
-        float goal_forward_vel = m_planner_config.pursuit_goal_forward_vel;
-        float goal_angle_pid_p = m_planner_config.pursuit_goal_angle_pid_p;
-
-        float dist_to_goal = std::sqrt((actual_pose.x() - global_path.back().x())*(actual_pose.x() - global_path.back().x()) + (actual_pose.y() - global_path.back().y())*(actual_pose.y() - global_path.back().y()) );
-        if(dist_to_goal < m_planner_config.pursuit_direct_goal_dist){
-            target_pose = global_path.back();
-        }
-        if(dist_to_goal < m_planner_config.pursuit_final_goal_dist){
-            goal_forward_vel = m_planner_config.pursuit_goal_final_forward_vel;
-            goal_angle_pid_p = m_planner_config.pursuit_goal_final_angle_pid_p;
-
-        }
-
-
 
         float final_path_yaw_map = std::atan2(global_path[global_path.size()-1].y() - global_path[global_path.size()-2].y(), global_path[global_path.size()-1].x() - global_path[global_path.size()-2].x());
         float target_yaw_map = target_pose.yaw();
@@ -751,6 +1225,9 @@ namespace control{
         float base_yaw_error = angle_normalise(target_yaw_map, base_yaw_map)-base_yaw_map;
 
 
+        float pid_goal_forward_vel =  base_to_target_dist*goal_forward_vel_pid_p;
+        pid_goal_forward_vel = std::min(std::max(pid_goal_forward_vel,goal_forward_vel_min ),goal_forward_vel_max );
+        goal_forward_vel = pid_goal_forward_vel;
 
         command_linear_x = goal_forward_vel*std::cos(wheel_yaw_base);
         command_linear_y = goal_forward_vel*std::sin(wheel_yaw_base);
@@ -777,5 +1254,6 @@ namespace control{
 
 
         m_path_node_id = 0;
+        m_path_node_id_interpolate = 0.0;
     }
 }

@@ -28,12 +28,25 @@ set_target_properties(liblua PROPERTIES  IMPORTED_LOCATION "${LUA_LIBRARIES}")
 target_include_directories(liblua INTERFACE ${LUA_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/third_party/sol)
 target_link_libraries(liblua INTERFACE  dl )
 
+build_external_project(Eigen3 lib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen-3.4.0.zip  -DCMAKE_BUILD_TYPE=Release )
+message(Eigen3_ROOT : ${Eigen3_ROOT} )
+
+set(Eigen3_ROOT ${Eigen3_ROOT}/share/eigen3/cmake)
+find_package(Eigen3 3.4.0 REQUIRED HINTS ${Eigen3_ROOT})
+message(new eigen: EIGEN3_INCLUDE_DIRS : ${EIGEN3_INCLUDE_DIRS} )
+
+
+build_external_project(Ceres lib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ceres-solver-2.1.0.tar.gz  -DEigen3_ROOT=${Eigen3_ROOT} -DCMAKE_BUILD_TYPE=Release -DMINIGLOG=ON -DGFLAGS=OFF -DSUITESPARSE=OFF -DBUILD_EXAMPLES=OFF -DBUILD_DOCUMENTATION=OFF)
+find_package(Ceres  REQUIRED)
+message(Ceres_ROOT : ${Ceres_ROOT} ,CERES_LIBRARIES : ${CERES_LIBRARIES} )
+
+
 
 add_subdirectory(src/message/impl/ros)
 add_subdirectory(src/message/impl/mqtt)
 
 
-set(shared_dirs ${mosquitto_ROOT}/lib)
+set(shared_dirs ${mosquitto_ROOT}/lib ${Ceres_ROOT}/lib)
 foreach(dir ${shared_dirs})
 	if(EXISTS "${dir}" AND IS_DIRECTORY "${dir}")
 		message("EXISTS：${dir}")
@@ -66,9 +79,9 @@ find_package(Eigen3 REQUIRED )
 message(new eigen: EIGEN3_INCLUDE_DIRS : ${EIGEN3_INCLUDE_DIRS} )
 #https://stackoverflow.com/questions/43330165/how-to-link-a-shared-library-with-cmake-with-relative-path/69707790#69707790
 
-add_library(controller SHARED  src/control/MobileRobotController.cpp)
+add_library(controller SHARED  src/control/MobileRobotController.cpp src/control/MotionPlanner.cpp)
 set_property(TARGET controller PROPERTY CXX_STANDARD 14)
-target_link_libraries(controller PUBLIC  absl::strings  absl::str_format ${mosquitto_LIBRARY} ros_message_manager mqtt_message_manager)
+target_link_libraries(controller PUBLIC  absl::strings  absl::str_format ${mosquitto_LIBRARY} ros_message_manager mqtt_message_manager ${CERES_LIBRARIES})
 target_include_directories(controller PUBLIC include src  ${EIGEN3_INCLUDE_DIRS}   )
 set_target_properties(controller PROPERTIES
 		BUILD_WITH_INSTALL_RPATH FALSE

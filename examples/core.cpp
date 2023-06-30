@@ -48,6 +48,8 @@
 #include "common/task.h"
 #include "common/functions.h"
 #include "common/signals.h"
+#include "common/stamped_buffer.h"
+#include "math/BezierGenerator.h"
 #include "nlohmann/json.hpp"
 
 #include "message/crc.h"
@@ -59,6 +61,8 @@
 
 
 #include "control/MobileRobotController.h"
+#include "control/MotionPlanner.h"
+
 
 #include <plog/Log.h> // Step1: include the headers
 #include <plog/Initializers/RollingFileInitializer.h>
@@ -119,84 +123,6 @@ struct AngleStamped{
     float angle = 0;
 };
 
-template<typename T>
-struct ValueStamped{
-
-    common::Time time = common::FromUnixNow();
-    T value ;
-};
-
-
-template<typename T>
-struct ValueStampedBuffer{
-    std::deque<ValueStamped<float>> buffer;
-    void add(float value){
-
-        buffer.push_back(ValueStamped<float>{common::FromUnixNow(), value});
-
-        if(buffer.size() > 2000){
-            buffer.erase(buffer.begin(),buffer.begin() + 1000);
-        }
-    }
-    bool empty(){
-        return buffer.empty();
-    }
-
-    size_t size(){
-        return buffer.size();
-    }
-    bool query(const common::Time& time, T & value){
-
-        if(buffer.size() < 3){
-            return false;
-        }
-
-        if(time == buffer.back().time){
-
-            value = buffer.back().value;
-            return true;
-        }
-
-        // first v > t
-
-        auto pred = [time](auto&x){return x.time < time;};
-        auto mid = std::partition (buffer.begin(),buffer.end(),pred);
-
-
-//        auto it = std::stable_partition(buffer.begin(),buffer.end(), [time](auto& v) { return v.time > time; });
-
-
-
-
-
-        if(mid!= buffer.end()){
-            auto low_it = std::prev(mid);
-            auto up_it = mid;
-
-            auto s1 =  common::ToMicroSeconds(up_it->time - low_it->time);
-            auto s2 =  common::ToMicroSeconds(time - low_it->time);
-
-//            std::cout << "interpolate, up: "  << std::distance(buffer.begin(), up_it)  << ", low:  " << std::distance(buffer.begin(), low_it) << std::endl;
-
-//            std::cout << "interpolate, value : " << up_it->value << ", " << low_it->value << std::endl;
-
-//            std::cout << "interpolate: time " << s1*1e-6 << ", " << s2*1e-6<< std::endl;
-
-
-            value = low_it->value + (up_it->value - low_it->value)*s2/s1;
-
-            return true;
-        }else{
-            return false;
-        }
-
-        return false;
-    }
-    ValueStamped<float>& back(){
-        return buffer.back();
-    }
-
-};
 struct ControllerConfig{
 
     bool use_rot_angle_abs = false;
@@ -218,14 +144,19 @@ struct ControllerConfig{
     float rotate_vel = 0.5;
 
     float max_forward_vel = 0.5;
+    float max_forward_acc = 0.8;
     float max_rotate_angle = 1.9;
+    float max_rotate_vel = 3.0;
+    float min_forward_vel = 0.05;
+
+
 
     float actual_rot_angle = 0.0;
     float actual_forward_vel = 0.0;
     float actual_rot_abs_angle = 0.0;
 
-    ValueStampedBuffer<float> angle_buffer;
-    ValueStampedBuffer<float> angle_abs_buffer;
+    common::ValueStampedBuffer<float> angle_buffer;
+    common::ValueStampedBuffer<float> angle_abs_buffer;
 
     common::Time forward_time;
     common::Time rotate_time;
@@ -363,7 +294,12 @@ constexpr auto ControllerConfig_properties = std::make_tuple(
         common::property(&ControllerConfig::mount_x, "mount_x"),
         common::property(&ControllerConfig::mount_y, "mount_y"),
         common::property(&ControllerConfig::max_forward_vel, "max_forward_vel"),
-        common::property(&ControllerConfig::max_rotate_angle, "max_rotate_angle")
+        common::property(&ControllerConfig::max_forward_acc, "max_forward_acc"),
+        common::property(&ControllerConfig::max_rotate_angle, "max_rotate_angle"),
+        common::property(&ControllerConfig::max_rotate_vel, "max_rotate_vel"),
+        common::property(&ControllerConfig::min_forward_vel, "min_forward_vel")
+
+
 
 );
 void to_json(nlohmann::json& j, const ControllerConfig& object)
@@ -410,6 +346,85 @@ constexpr auto RawCommand_properties = std::make_tuple(
         common::property(&RawCommand::rotate_angle_1, "rotate_angle_1"),
         common::property(&RawCommand::rotate_angle_2, "rotate_angle_2")
 );
+
+constexpr auto PlannerConfig_properties = std::make_tuple(
+        common::property(&control::PlannerConfig::stable_pose_dist_tolerance, "stable_pose_dist_tolerance"),
+        common::property(&control::PlannerConfig::stable_pose_angle_tolerance, "stable_pose_angle_tolerance"),
+
+        common::property(&control::PlannerConfig::curve_path_angle, "curve_path_angle"),
+        common::property(&control::PlannerConfig::curve_path_window, "curve_path_window"),
+        common::property(&control::PlannerConfig::curve_path_speed_ratio, "curve_path_speed_ratio"),
+
+
+        common::property(&control::PlannerConfig::start_pose_dist, "start_pose_dist"),
+        common::property(&control::PlannerConfig::first_rotate_angle_tolerance, "first_rotate_angle_tolerance"),
+        common::property(&control::PlannerConfig::first_rotate_angle_p, "first_rotate_angle_p"),
+        common::property(&control::PlannerConfig::first_rotate_vel, "first_rotate_vel"),
+
+
+        common::property(&control::PlannerConfig::first_rotate_acc, "first_rotate_acc"),
+
+        common::property(&control::PlannerConfig::pursuit_path_interpolate_step, "pursuit_path_interpolate_step"),
+        common::property(&control::PlannerConfig::pursuit_path_angle_converge, "pursuit_path_angle_converge"),
+
+
+        common::property(&control::PlannerConfig::pursuit_path_angle_pid_p, "pursuit_path_angle_pid_p"),
+
+        common::property(&control::PlannerConfig::pursuit_path_forward_vel, "pursuit_path_forward_vel"),
+
+        common::property(&control::PlannerConfig::pursuit_goal_dist, "pursuit_goal_dist"),
+
+        //
+
+        common::property(&control::PlannerConfig::pursuit_goal_forward_vel, "pursuit_goal_forward_vel"),
+        common::property(&control::PlannerConfig::pursuit_goal_angle_pid_p, "pursuit_goal_angle_pid_p"),
+        common::property(&control::PlannerConfig::pursuit_direct_goal_dist, "pursuit_direct_goal_dist"),
+        common::property(&control::PlannerConfig::pursuit_final_goal_dist, "pursuit_final_goal_dist"),
+        common::property(&control::PlannerConfig::pursuit_goal_final_angle_pid_p, "pursuit_goal_final_angle_pid_p"),
+        common::property(&control::PlannerConfig::pursuit_goal_final_forward_vel, "pursuit_goal_final_forward_vel"),
+
+        common::property(&control::PlannerConfig::pursuit_goal_reach_tolerance, "pursuit_goal_reach_tolerance"),
+
+        common::property(&control::PlannerConfig::pursuit_goal_forward_vel_pid_p, "pursuit_goal_forward_vel_pid_p"),
+        common::property(&control::PlannerConfig::pursuit_goal_forward_vel_min, "pursuit_goal_forward_vel_min"),
+        common::property(&control::PlannerConfig::pursuit_goal_forward_vel_max, "pursuit_goal_forward_vel_max"),
+        common::property(&control::PlannerConfig::pursuit_goal_final_forward_vel_pid_p, "pursuit_goal_final_forward_vel_pid_p"),
+        common::property(&control::PlannerConfig::pursuit_goal_final_forward_vel_min, "pursuit_goal_final_forward_vel_min"),
+        common::property(&control::PlannerConfig::pursuit_goal_final_forward_vel_max, "pursuit_goal_final_forward_vel_max")
+
+
+        );
+
+namespace control{
+
+    void to_json(nlohmann::json& j, const PlannerConfig& object)
+    {
+
+        constexpr auto nbProperties = std::tuple_size<decltype(PlannerConfig_properties)>::value;
+        common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
+            // get the property
+            auto& property = std::get<i>(PlannerConfig_properties);
+            // set the value to the member
+            j[property.name] = object.*(property.member);
+        });
+    }
+
+
+    void from_json(const nlohmann::json& j, PlannerConfig& object) {
+
+        constexpr auto nbProperties = std::tuple_size<decltype(PlannerConfig_properties)>::value;
+        common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
+            // get the property
+            auto& property = std::get<i>(PlannerConfig_properties);
+            // set the value to the member
+            if(j.contains(property.name))
+                j.at(property.name).get_to(object.*(property.member));
+            else{
+                std::cerr << "from_json: key["<<property.name<<"] not exist"<< std::endl;
+            }
+        });
+    }
+}
 
 void to_json(nlohmann::json& j, const RawCommand& object)
 {
@@ -485,9 +500,52 @@ void from_json(const nlohmann::json& j, CanMsgForward& object) {
     });
 }
 
-struct CanForward{
+struct PathConfig{
+
+    bool run = false;
+    bool fix_direction = false;
+    float direction = 0.0;
+    std::vector<std::array<std::array<float,2>,4>> path;
 
 };
+constexpr auto PathConfig_properties = std::make_tuple(
+        common::property(&PathConfig::run, "run"),
+        common::property(&PathConfig::fix_direction, "fix_direction"),
+        common::property(&PathConfig::direction, "direction"),
+        common::property(&PathConfig::path, "path")
+);
+
+
+void to_json(nlohmann::json& j, const PathConfig& object)
+{
+
+    constexpr auto nbProperties = std::tuple_size<decltype(PathConfig_properties)>::value;
+    common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
+        // get the property
+        auto& property = std::get<i>(PathConfig_properties);
+        // set the value to the member
+        j[property.name] = object.*(property.member);
+    });
+}
+
+void from_json(const nlohmann::json& j, PathConfig& object) {
+
+    constexpr auto nbProperties = std::tuple_size<decltype(PathConfig_properties)>::value;
+    common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
+        // get the property
+        auto& property = std::get<i>(PathConfig_properties);
+        // set the value to the member
+        if(j.contains(property.name))
+//            object.*(property.member) = j[property.name];
+            j.at(property.name).get_to(object.*(property.member));
+        else{
+            std::cerr << "from_json: key["<<property.name<<"] not exist"<< std::endl;
+        }
+    });
+}
+
+
+
 int test_tec(int argc, char** argv) {
 
 
@@ -495,7 +553,7 @@ int test_tec(int argc, char** argv) {
     auto my_handler = common::fnptr<void(int)>([&](int sig){ std::cout << "get sig " << sig;program_run = false;});
     common::set_signal_handler(my_handler);
 
-    plog::RollingFileAppender<plog::CsvFormatter> fileAppender("tec.csv", 80000000, 20); // Create the 1st appender.
+    plog::RollingFileAppender<plog::CsvFormatter> fileAppender("tec.csv", 20000000, 20); // Create the 1st appender.
     plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender; // Create the 2nd appender.
     plog::init(plog::debug, &fileAppender).addAppender(&consoleAppender); // Initialize the logger with the both appenders.
 
@@ -525,10 +583,12 @@ int test_tec(int argc, char** argv) {
     std::string config_file;
 
     std::string can_forward_file;
+    std::string planner_config_file;
+    std::string path_config_file;
 
 
-    float forward_vel_acc = 0.8;
-    float rotate_angle_vel = 0.8;
+//    float forward_vel_acc = 0.8;
+//    float rotate_angle_vel = 0.8;
 
     bool use_rot_angle_abs = false;
 
@@ -546,8 +606,11 @@ int test_tec(int argc, char** argv) {
                | lyra::opt(initialise_wait_s,"initialise_wait_s")["-i"]["--initialise_wait_s"]("initialise_wait_s")
                | lyra::opt(mqtt_server,"mqtt_server")["-M"]["--mqtt_server"]("mqtt_server")
                | lyra::opt(can_forward_file,"can_forward_file")["-T"]["--can_forward_file"]("can_forward_file")
-               | lyra::opt(forward_vel_acc,"forward_vel_acc")["-F"]["--forward_vel_acc"]("forward_vel_acc")
-               | lyra::opt(rotate_angle_vel,"rotate_angle_vel")["-R"]["--rotate_angle_vel"]("rotate_angle_vel")
+               | lyra::opt(planner_config_file,"planner_config_file")["-P"]["--planner_config_file"]("planner_config_file")
+                 | lyra::opt(path_config_file,"path_config_file")["-p"]["--path_config_file"]("path_config_file")
+
+//               | lyra::opt(forward_vel_acc,"forward_vel_acc")["-F"]["--forward_vel_acc"]("forward_vel_acc")
+//               | lyra::opt(rotate_angle_vel,"rotate_angle_vel")["-R"]["--rotate_angle_vel"]("rotate_angle_vel")
 
                //---
                | lyra::group().sequential()
@@ -594,6 +657,8 @@ int test_tec(int argc, char** argv) {
     std::vector<ControllerConfig> SteerConfigArray;
     std::vector<ControllerState >SteerStateArray;
     std::vector<CanMsgForward> CanForwardConfigArray;
+    control::PlannerConfig planner_config;
+    std::vector<PathConfig> path_config;
 
 
     if(!config_file.empty()){
@@ -639,29 +704,71 @@ int test_tec(int argc, char** argv) {
     if(!can_forward_file.empty()){
         std::ifstream ifs(can_forward_file.c_str());
         if(ifs.is_open()){
-
             try{
                 nlohmann::json jf = nlohmann::json::parse(ifs);
-
                 std::cout << "can_forward_file: " << can_forward_file<< "\n jf :\n" << jf << std::endl;
-
                 CanForwardConfigArray = jf;
             }catch(nlohmann::detail::parse_error & e) {
-
                 std::cout << e.what() << std::endl;
                 std::cout << "json format error in can_forward_file: " << can_forward_file<<  std::endl;
-
                 return 0;
-
             }
-
-
         }else{
             std::cout << "can_forward_file not exist" << std::endl;
             return 0;
-
         }
     }
+
+    if(!path_config_file.empty()){
+        std::ifstream ifs(path_config_file.c_str());
+        if(ifs.is_open()){
+            try{
+                nlohmann::json jf = nlohmann::json::parse(ifs);
+                std::cout << "path_config_file: " << path_config_file<< "\n jf :\n" << jf << std::endl;
+                path_config = jf;
+            }catch(nlohmann::detail::parse_error & e) {
+                std::cout << e.what() << std::endl;
+                std::cout << "json format error in path_config_file: " << path_config_file<<  std::endl;
+                return 0;
+            }
+        }else{
+            std::cout << "path_config_file not exist" << std::endl;
+
+            path_config.resize(2);
+            for(auto& p: path_config){
+                p.path.resize(8);
+            }
+
+            nlohmann::json j3 = path_config;
+            std::cout << "path_config:\n" << j3.dump(2)<< std::endl;
+
+
+            std::ofstream ofs(path_config_file.c_str());
+            ofs << j3.dump(2) << std::endl;
+            ofs.close();
+            return 0;
+        }
+    }
+
+
+    if(!planner_config_file.empty()){
+        std::ifstream ifs(planner_config_file.c_str());
+        if(ifs.is_open()){
+            try{
+                nlohmann::json jf = nlohmann::json::parse(ifs);
+                std::cout << "planner_config_file: " << planner_config_file<< "\n jf :\n" << jf << std::endl;
+                planner_config = jf;
+            }catch(nlohmann::detail::parse_error & e) {
+                std::cout << e.what() << std::endl;
+                std::cout << "json format error in planner_config_file: " << planner_config_file<<  std::endl;
+                return 0;
+            }
+        }else{
+            std::cout << "planner_config_file not exist" << std::endl;
+            return 0;
+        }
+    }
+
 
     extra_command.emplace_back(exe_name);
     std::copy(command.begin(), command.end(), std::back_inserter(extra_command));
@@ -785,6 +892,15 @@ int test_tec(int argc, char** argv) {
     rosMessageManager.add_channel<common_message::Twist>("PUB:cmd_vel:10");
     rosMessageManager.add_channel<common_message::Odometry>("PUB:odom:200");
 
+
+    rosMessageManager.add_channel<common_message::Path>("PSUB:request_path:10");
+    rosMessageManager.add_channel<common_message::PoseStamped>("PSUB:request_goal:10");
+
+    rosMessageManager.add_channel<common_message::Path>("PPUB:global_path:10");
+    rosMessageManager.add_channel<common_message::Path>("PPUB:local_path:10");
+    rosMessageManager.add_channel<common_message::Odometry>("PPUB:stable_pose:200");
+
+
     std::vector<common_message::Twist> cmd_vel_msgs(10);
     common_message::Twist send_cmd_vel;
     common_message::Odometry odom;
@@ -812,6 +928,43 @@ int test_tec(int argc, char** argv) {
 
     odom.twist.covariance[35] = 0.1;
 
+    common_message::Path request_path;
+    request_path.header.frame_id.assign("map");
+
+    common_message::Path planner_global_path;
+    planner_global_path.header.frame_id.assign("map");
+
+
+    common_message::Path planner_local_path;
+    planner_local_path.header.frame_id.assign("map");
+
+    common_message::Odometry planner_stable_pose;
+    planner_stable_pose.header.frame_id.assign("map");
+
+    if(!path_config.empty()){
+        auto &p1 = path_config[0].path;
+        std::vector<std::array<float,2>>  path;
+        float step = 0.1;
+
+        for(auto & p2:p1){
+
+            float PA[2] = {p2[0][0],p2[0][1]};
+            float PB[2] = {p2[1][0],p2[1][1]};
+            float PC[2] = {p2[2][0],p2[2][1]};
+            float PD[2] = {p2[3][0],p2[3][1]};
+            math::buildBezier(PA, PB,PC, PD, step,path);
+            size_t last_len = planner_global_path.poses.size();
+            planner_global_path.poses.resize(last_len + path.size());
+
+            for(size_t i = 0 ; i < path.size();i++){
+                planner_global_path.poses[last_len + i].pose.position.x = path[i][0];
+                planner_global_path.poses[last_len + i].pose.position.y = path[i][1];
+            }
+        }
+    }
+
+
+
 
     // todo: callback may fail if topic and datetye not matched
     bool recv_new_cmd_vel = false;
@@ -824,6 +977,30 @@ int test_tec(int argc, char** argv) {
         recv_cmd_vel_time = common::FromUnixNow();
         recv_new_cmd_vel = true;
     };
+
+
+
+    control::DoubleSteerMotionPlanner motion_planner;
+    // path callback
+    // start: path size >= 1
+    // pause: cmd_vel is 0
+    // stop/cancel : path size = 0
+    // velocity constrains: ros param or embed in frame_id string
+    // ros
+    auto planner_path_sub_cb = [&motion_planner](void* data){
+        common_message::Path * data_ptr = static_cast<common_message::Path*>(data);
+
+        motion_planner.requestPath(*data_ptr);
+    };
+
+
+    // goal callbak
+    auto planner_goal_sub_cb = [&motion_planner](void* data){
+        common_message::PoseStamped * data_ptr = static_cast<common_message::PoseStamped*>(data);
+        motion_planner.requestGoal(*data_ptr);
+
+    };
+
 
 
     //ros
@@ -1230,8 +1407,10 @@ int test_tec(int argc, char** argv) {
         };
         taskManager.addTask([&rosMessageManager,&c,&device,&can_channel_send_msg,can_message_sub_cb]{
 
+            char key_buffer[100];
+            sprintf(key_buffer,"SUB:%s",c.sub_topic.c_str());
 
-            rosMessageManager.recv_message(c.sub_topic.c_str(),10,0.001, can_message_sub_cb);
+            rosMessageManager.recv_message(key_buffer,10,0.001, can_message_sub_cb);
 
             if(can_channel_send_msg[c.channel_id].empty()){
                 return true;
@@ -1247,7 +1426,9 @@ int test_tec(int argc, char** argv) {
                 return true;
             }
 
-            rosMessageManager.send_message(c.pub_topic.c_str(),&can_channel_forward_msg[c.channel_id], 1, 0.1 );
+            char key_buffer[100];
+            sprintf(key_buffer,"PUB:%s",c.pub_topic.c_str());
+            rosMessageManager.send_message(key_buffer,&can_channel_forward_msg[c.channel_id], 1, 0.1 );
             can_channel_forward_msg[c.channel_id].messages.clear();
             return true;
         },100*1000,2);
@@ -1265,8 +1446,11 @@ int test_tec(int argc, char** argv) {
         wheels_array[i].mount_position_x = SteerConfigArray[i].mount_x;
         wheels_array[i].mount_position_y = SteerConfigArray[i].mount_y;
 
-        wheels_array[i].max_forward_acc = forward_vel_acc;
-        wheels_array[i].max_rot_vel = rotate_angle_vel;
+        wheels_array[i].max_forward_acc = SteerConfigArray[i].max_forward_acc;
+        wheels_array[i].max_rot_vel = SteerConfigArray[i].max_rotate_vel;
+
+        wheels_array[i].min_forward_vel = SteerConfigArray[i].min_forward_vel;
+
         wheels_array[i].max_forward_vel = SteerConfigArray[i].max_forward_vel;
         wheels_array[i].max_rot_angle = SteerConfigArray[i].max_rotate_angle;
 
@@ -1280,7 +1464,90 @@ int test_tec(int argc, char** argv) {
     control::SmoothSimulator smoothSimulator;
     smoothSimulator.set_wheel(wheels_array[0],wheels_array[1]);
 
+    motion_planner.m_planner_config = planner_config;
+    motion_planner.initBase(wheels_array);
 
+    common_message::TransformStamped planner_map_base_tf;
+    planner_map_base_tf.base_frame.assign("map");
+    planner_map_base_tf.target_frame.assign("base_link");
+
+    common_message::TransformStamped planner_odom_base_tf;
+    planner_odom_base_tf.base_frame.assign("odom");
+    planner_odom_base_tf.target_frame.assign("base_link");
+
+
+    taskManager.addTask([&]{
+
+        // lookup tf map base_link
+        // lookup tf odom base_link
+        auto now = common::FromUnixNow();
+
+        planner_map_base_tf.time = now;
+        planner_odom_base_tf.time = now;
+
+        long rt1 = rosMessageManager.recv_tf(planner_map_base_tf);
+        long rt2 = rosMessageManager.recv_tf(planner_odom_base_tf);
+
+        if(rt1 == 0){
+            motion_planner.updateMapBasePose(planner_map_base_tf);
+
+        }
+        if(rt2 == 0){
+            motion_planner.updateOdomBasePose(planner_odom_base_tf);
+        }
+
+        motion_planner.updateOdom(odom);
+
+        bool get_pose = motion_planner.getStablePose();
+
+
+        PLOGD << "motion planner: get_pose: " << get_pose;
+
+        return true;
+    },10*1000,0);
+
+    taskManager.addTask([&]{
+        auto now = common::FromUnixNow();
+
+
+        bool get_pose = motion_planner.getStablePose();
+        if(get_pose){
+            rosMessageManager.recv_message("PSUB:request_goal",1,0.001, planner_goal_sub_cb);
+            rosMessageManager.recv_message("PSUB:request_path",1,0.001, planner_path_sub_cb);
+        }
+
+
+
+        if(!motion_planner.m_global_path.value.empty()){
+            size_t pose_num = motion_planner.m_global_path.value.size();
+            planner_global_path.poses.resize(pose_num);
+            for(size_t i = 0 ; i < pose_num;i++){
+                planner_global_path.poses[i].pose = common_message::Transform2dToPose(motion_planner.m_global_path.value[i]);
+            }
+            planner_global_path.header.stamp = now;
+            rosMessageManager.send_message("PPUB:global_path",&planner_global_path, 1, 0.1 );
+        }
+        if(!motion_planner.m_local_path.value.empty()){
+            size_t pose_num = motion_planner.m_local_path.value.size();
+            planner_local_path.poses.resize(pose_num);
+            for(size_t i = 0 ; i < pose_num;i++){
+                planner_local_path.poses[i].pose = common_message::Transform2dToPose(motion_planner.m_local_path.value[i]);
+            }
+            planner_local_path.header.stamp = now;
+            rosMessageManager.send_message("PPUB:local_path",&planner_local_path, 1, 0.1 );
+        }
+
+        if(motion_planner.m_stable_pose_get){
+
+            planner_stable_pose.pose.pose = common_message::Transform2dToPose(motion_planner.m_actual_pose.value);
+            planner_stable_pose.header.stamp = now;
+            rosMessageManager.send_message("PPUB:stable_pose",&planner_stable_pose, 1, 0.1 );
+
+        }
+
+
+        return true;
+    },100*1000,1);
 
     common_message::TransformStamped send_map_odom_tf, send_odom_base_tf;
     send_map_odom_tf.base_frame.assign("map");
@@ -1377,6 +1644,24 @@ int test_tec(int argc, char** argv) {
         }, 500*1000,1);
     }else{
 
+        taskManager.addTask([&]{
+
+            if(path_config.empty()){
+                return false;
+            }
+
+            auto now = common::FromUnixNow();
+            planner_global_path.header.stamp = now;
+            motion_planner.requestPath(planner_global_path);
+
+            rosMessageManager.send_message("PPUB:global_path",&planner_global_path, 1, 0.1 );
+
+
+            return false;
+        },2*1000*1000,1);
+
+
+
         is_all_alive = true;
         is_all_initialised = true;
         is_any_fault = false;
@@ -1417,6 +1702,7 @@ int test_tec(int argc, char** argv) {
 
     // odom
     taskManager.addTask([&]{
+
 
         PLOGD << "is_all_alive: " << is_all_alive;
         PLOGD << "is_rot_sensor_ready: " << is_rot_sensor_ready;
@@ -1469,7 +1755,7 @@ int test_tec(int argc, char** argv) {
 
 
 
-            rosMessageManager.send_message("odom",&odom, 1, 0.1 );
+            rosMessageManager.send_message("PUB:odom",&odom, 1, 0.1 );
 
 
             {
@@ -1533,22 +1819,67 @@ int test_tec(int argc, char** argv) {
 
 
             if((is_all_alive && is_all_initialised && is_rot_sensor_ready && ! is_any_fault)){
-                rosMessageManager.recv_message("control_cmd_vel",10,0.001, cmd_vel_sub_cb);
 
-                auto now = common::FromUnixNow();
-                if( common::ToMillSeconds(now - recv_cmd_vel_time) > cmd_vel_timeout_ms){
+                if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::idle || motion_planner.getTaskState() == control::MotionPlanner::TaskState::finished){
 
-                    PLOGD << "cmd_vel timeout, cmd_vel reset";
-                    recv_cmd_vel_msg.linear.x = 0.0;
-                    recv_cmd_vel_msg.linear.y = 0.0;
-                    recv_cmd_vel_msg.angular.z = 0.0;
-                    recv_cmd_vel_time = now;
+                    rosMessageManager.recv_message("SUB:control_cmd_vel",10,0.001, cmd_vel_sub_cb);
 
+                    auto now = common::FromUnixNow();
+                    if( common::ToMillSeconds(now - recv_cmd_vel_time) > cmd_vel_timeout_ms){
+
+                        PLOGD << "cmd_vel timeout, cmd_vel reset";
+                        recv_cmd_vel_msg.linear.x = 0.0;
+                        recv_cmd_vel_msg.linear.y = 0.0;
+                        recv_cmd_vel_msg.angular.z = 0.0;
+                        recv_cmd_vel_time = now;
+
+                    }
+                    if(recv_new_cmd_vel){
+                        recv_new_cmd_vel = false;
+                        PLOGD<< "recv cmd_vel:[rotate_vel,forward_vel]: " << recv_cmd_vel_msg.angular.z << ", " << recv_cmd_vel_msg.linear.x;
+                    }
+                }else{
+                    PLOGD << "motion_planner.go()";
+
+                    motion_planner.updateWheelState(SteerConfigArray[0].actual_forward_vel,SteerConfigArray[0].actual_rot_abs_angle, SteerConfigArray[1].actual_forward_vel,SteerConfigArray[1].actual_rot_abs_angle);
+
+                    common::Time t1 = common::FromUnixNow();
+                    auto& command = motion_planner.go();
+                    PLOGD << "go_time: " << common::ToMillSeconds(common::FromUnixNow() - t1) << " ms";
+                    if(command.command_type == control::MotionPlanner::CommandType::cmd_vel && command.command.size() == 3 ){
+
+                        PLOGD << "cmd_vel: " << command.command[0] << ", " << command.command[1] << ", " << command.command[2];
+
+                        recv_cmd_vel_msg.linear.x = command.command[0];
+                        recv_cmd_vel_msg.linear.y = command.command[1];
+                        recv_cmd_vel_msg.angular.z = command.command[2];
+                        controller.setSmoothStop();
+                        controller.setSteerPreference(motion_planner.m_start_wheel_angle);
+
+                    }else if(command.command_type == control::MotionPlanner::CommandType::raw && command.command.size() == 4 ){
+
+
+
+                        controller.m_steer_wheel[0].getCommandForwardVel() =  command.command[0];
+                        controller.m_steer_wheel[0].getCommandRotateAngle() =  std::max(std::min(1.918888889f,  command.command[1]),-1.918888889f);
+                        controller.m_steer_wheel[1].getCommandForwardVel() =  command.command[2];
+                        controller.m_steer_wheel[1].getCommandRotateAngle() =  std::max(std::min(1.918888889f,  command.command[3]),-1.918888889f);
+
+                        PLOGD << "raw command: " << command.command[0] << ", " << command.command[1] << ", " << command.command[2] << ", " << command.command[3];
+
+                        control_wheel(true, controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle() ,controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle() );
+
+
+                        return true;
+                    }else{
+                        controller.setSteerPreference(0.0f);
+                        recv_cmd_vel_msg.linear.x = 0.0;
+                        recv_cmd_vel_msg.linear.y = 0.0;
+                        recv_cmd_vel_msg.angular.z = 0.0;
+
+                    }
                 }
-                if(recv_new_cmd_vel){
-                    recv_new_cmd_vel = false;
-                    PLOGD<< "recv cmd_vel:[rotate_vel,forward_vel]: " << recv_cmd_vel_msg.angular.z << ", " << recv_cmd_vel_msg.linear.x;
-                }
+
 
 
 
@@ -1607,7 +1938,7 @@ int test_tec(int argc, char** argv) {
 
 
             return true;
-        }, 10*1000,1);
+        }, 5*1000,1);
 
     }else{
         PLOGD << "add fix command";
@@ -2653,7 +2984,7 @@ print("start lua state")
 
 
 
-               rosMessageManager.send_message("odom",&odom, 1, 0.1 );
+               rosMessageManager.send_message("PUB:odom",&odom, 1, 0.1 );
            }
 
            if( common::ToMillSeconds(now - recv_cmd_vel_time) > cmd_vel_timeout_ms){

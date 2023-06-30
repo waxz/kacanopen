@@ -37,12 +37,12 @@ namespace control {
 //        transform::Transform2d position;
 
         // rot range
-        float min_rot_angle = -1.1 * M_PI_2;
         float max_rot_angle = 1.1 * M_PI_2;
 
         // acc/vel limit
         float max_forward_acc = 0.8;  // vel change limit , unit m/s2
         float max_forward_vel = 1.2;  // vel limit, unit m/s
+        float min_forward_vel = 0.05;
         float max_rot_acc = 2*M_PIf32;      // vel change limit, unit rag/s2
         float max_rot_vel = 0.5*M_PIf32;      // vel limit , unit rag/s // 3000rpm ==> 1 rotate per second
 
@@ -101,14 +101,14 @@ namespace control {
         void createCommand(float forward_vel, float rot_angle) {
             command_forward_vel = forward_vel;
             command_rotate_angle = rot_angle ;
-            command_rotate_angle = std::min(std::max(command_rotate_angle, min_rot_angle), max_rot_angle);
+            command_rotate_angle = std::min(std::max(command_rotate_angle, -max_rot_angle), max_rot_angle);
             command_forward_vel = std::min(std::max(command_forward_vel, -max_forward_vel), max_forward_vel);
         }
 
 
 
         // transform command to motor frame
-        void createCommand();
+        void createCommand(float steer_preference_angle);
     };
 
 
@@ -197,6 +197,8 @@ namespace control {
         bool smooth_stop = true;
         bool smooth_stop_temp = false;
 
+        void setSmoothStop();
+
 
         virtual const transform::Transform2d& getPosition() = 0;
         virtual float getActualForwardVel() = 0;
@@ -224,6 +226,8 @@ namespace control {
 
     class SmoothSimulator{
     public:
+        float m_prefer_steer_angle = 0.0;
+        void setSteerPreference(float angle);
 
         std::array<SteerWheelBase,2> m_steer_wheel;
         float constrain_angle = 0.0;
@@ -241,7 +245,11 @@ namespace control {
 
         std::array<SteerWheelBase,2> m_steer_wheel;
         float constrain_angle = 0.0;
+        float m_prefer_steer_angle = 0.0;
+
     public:
+
+        void setSteerPreference(float angle);
         void reset() override;
 
         void cmd_vel(float forward_vel, float rot_vel) override;
@@ -254,6 +262,11 @@ namespace control {
 
         void set_wheel(const SteerWheelBase &wheel_1, const SteerWheelBase &wheel_2);
 
+        common::Time interpolate_time;
+        common::Time interpolate_time_step_0;
+        common::Time interpolate_time_step_1;
+
+        size_t interpolate_cnt = 0;
         void interpolate();
 
         void updateState(float forward_vel_1, float rot_angle_1, float forward_vel_2, float rot_angle_2);

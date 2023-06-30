@@ -27,6 +27,16 @@ namespace control{
 
 
     struct PlannerConfig{
+
+        // check curve path,
+        float curve_path_angle = 0.2;
+        size_t curve_path_window = 5;
+        float curve_path_speed_ratio = 0.5;
+
+        // localization smooth
+        float stable_pose_dist_tolerance = 0.03;
+        float stable_pose_angle_tolerance = 0.05;
+
         // base actual pose to first pose in path
         float start_pose_dist = 1.0;
 
@@ -57,6 +67,11 @@ namespace control{
         float pursuit_goal_angle_pid_p = 0.2;
         float pursuit_goal_forward_vel = 0.1;
 
+        float pursuit_goal_forward_vel_pid_p = 0.1;
+        float pursuit_goal_forward_vel_min = 0.1;
+        float pursuit_goal_forward_vel_max = 0.1;
+
+
         float pursuit_direct_goal_dist = 0.5f;
 
         float pursuit_final_goal_dist = 0.2f;
@@ -64,8 +79,13 @@ namespace control{
         float pursuit_goal_final_angle_pid_p = 0.2;
         float pursuit_goal_final_forward_vel = 0.1;
 
+        float pursuit_goal_final_forward_vel_pid_p = 0.1;
+
+        float pursuit_goal_final_forward_vel_min = 0.01;
+        float pursuit_goal_final_forward_vel_max = 0.05;
 
         float pursuit_goal_reach_tolerance = 0.05;
+
 
 
 
@@ -169,6 +189,10 @@ namespace control{
         common::ValueStampedBuffer<transform::Transform2d> m_odom_base_buffer;
         common::ValueStamped<common_message::Odometry> m_actual_odom;
         common::ValueStamped<transform::Transform2d> m_actual_pose;
+        common::ValueStamped<transform::Transform2d> m_local_target;
+
+        common::ValueStamped<transform::Transform2d> m_local_target_last;
+
         transform::Transform2d m_map_odom_record;
         bool m_stable_pose_get = false;
 
@@ -199,6 +223,7 @@ namespace control{
         common::Time interpolate_time;
         common::Time interpolate_time_step_0;
         common::Time interpolate_time_step_1;
+
 
         virtual bool checkPath() = 0;
         // rotate
@@ -271,9 +296,13 @@ namespace control{
 
         void resetPlanner() override;
         size_t m_path_node_id = 0;
+        float m_path_node_id_interpolate = 0.0;
         bool createLocalPath() override;
         bool pursuit_path() override;
         bool pursuit_goal() override;
+
+        bool createLocalPath_v1();
+        bool createLocalPath_v2();
 
     };
 
