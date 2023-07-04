@@ -39,7 +39,7 @@ namespace kaco {
 struct Message {
 
 	/// Message ID aka COB-ID
-	uint16_t cob_id;
+	uint32_t cob_id;
 
 	/// Remote transmission request (0 if it's not an RTR message, 1 if it is an RTR message)
 	uint8_t rtr;

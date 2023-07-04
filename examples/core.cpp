@@ -362,6 +362,10 @@ constexpr auto PlannerConfig_properties = std::make_tuple(
         common::property(&control::PlannerConfig::first_rotate_vel, "first_rotate_vel"),
 
 
+
+        common::property(&control::PlannerConfig::first_rotate_vel_min, "first_rotate_vel_min"),
+
+
         common::property(&control::PlannerConfig::first_rotate_acc, "first_rotate_acc"),
 
         common::property(&control::PlannerConfig::pursuit_path_interpolate_step, "pursuit_path_interpolate_step"),
@@ -374,7 +378,8 @@ constexpr auto PlannerConfig_properties = std::make_tuple(
 
         common::property(&control::PlannerConfig::pursuit_goal_dist, "pursuit_goal_dist"),
 
-        //
+        //pursuit_path_angle_rot_vel_max
+        common::property(&control::PlannerConfig::pursuit_path_angle_rot_vel_max, "pursuit_path_angle_rot_vel_max"),
 
         common::property(&control::PlannerConfig::pursuit_goal_forward_vel, "pursuit_goal_forward_vel"),
         common::property(&control::PlannerConfig::pursuit_goal_angle_pid_p, "pursuit_goal_angle_pid_p"),
@@ -461,7 +466,7 @@ struct Controller{
 
 struct CanMsgForward{
     size_t channel_id = 0;
-    std::vector<uint16_t> recv_cob_id;
+    std::vector<uint32_t> recv_cob_id;
     std::string sub_topic;
     std::string pub_topic;
 };
@@ -592,6 +597,7 @@ int test_tec(int argc, char** argv) {
 
     bool use_rot_angle_abs = false;
 
+    bool use_dynamic_vel = false;
 
     auto cli
             =  lyra::exe_name(exe_name)
@@ -599,6 +605,7 @@ int test_tec(int argc, char** argv) {
                | lyra::opt( config_file, "config_file" )["-c"]["--config_file"]("config_file")
                | lyra::opt( enable_control)["-e"]["--enable_control"]("enable_control")
                | lyra::opt( use_sim)["-S"]["--use_sim"]("use_sim")
+               | lyra::opt( use_dynamic_vel)["-d"]["--use_dynamic_vel"]("use_dynamic_vel")
                | lyra::opt(smooth_stop,"smooth_stop")["-s"]["--smooth_stop"]("smooth_stop")
 //               | lyra::opt(use_rot_angle_abs,"use_rot_angle_abs")["-a"]["--abs_rot"]("use_rot_angle_abs")
                | lyra::opt(cmd_vel_timeout_ms,"cmd_vel_timeout_ms")["-t"]["--cmdvel_timeout"]("cmd_vel_timeout_ms")
@@ -889,16 +896,19 @@ int test_tec(int argc, char** argv) {
 
 
     rosMessageManager.add_channel<common_message::Twist>("SUB:control_cmd_vel:10");
-    rosMessageManager.add_channel<common_message::Twist>("PUB:cmd_vel:10");
+    rosMessageManager.add_channel<common_message::Twist>("PUB:cmd_vel_planner:10");
     rosMessageManager.add_channel<common_message::Odometry>("PUB:odom:200");
 
 
     rosMessageManager.add_channel<common_message::Path>("PSUB:request_path:10");
     rosMessageManager.add_channel<common_message::PoseStamped>("PSUB:request_goal:10");
+    rosMessageManager.add_channel<common_message::HeaderString>("PSUB:request_config:10");
 
     rosMessageManager.add_channel<common_message::Path>("PPUB:global_path:10");
     rosMessageManager.add_channel<common_message::Path>("PPUB:local_path:10");
     rosMessageManager.add_channel<common_message::Odometry>("PPUB:stable_pose:200");
+    rosMessageManager.add_channel<common_message::HeaderString>("PPUB:status:200");
+
 
 
     std::vector<common_message::Twist> cmd_vel_msgs(10);
@@ -941,26 +951,37 @@ int test_tec(int argc, char** argv) {
     common_message::Odometry planner_stable_pose;
     planner_stable_pose.header.frame_id.assign("map");
 
+    common_message::HeaderString planner_status;
+
+
     if(!path_config.empty()){
-        auto &p1 = path_config[0].path;
         std::vector<std::array<float,2>>  path;
         float step = 0.1;
+        for(auto& P : path_config){
+            if (P.run){
+                auto &p1 = P.path;
+                for(auto & p2:p1){
 
-        for(auto & p2:p1){
+                    float PA[2] = {p2[0][0],p2[0][1]};
+                    float PB[2] = {p2[1][0],p2[1][1]};
+                    float PC[2] = {p2[2][0],p2[2][1]};
+                    float PD[2] = {p2[3][0],p2[3][1]};
+                    math::buildBezier(PA, PB,PC, PD, step,path);
+                    size_t last_len = planner_global_path.poses.size();
+                    planner_global_path.poses.resize(last_len + path.size());
 
-            float PA[2] = {p2[0][0],p2[0][1]};
-            float PB[2] = {p2[1][0],p2[1][1]};
-            float PC[2] = {p2[2][0],p2[2][1]};
-            float PD[2] = {p2[3][0],p2[3][1]};
-            math::buildBezier(PA, PB,PC, PD, step,path);
-            size_t last_len = planner_global_path.poses.size();
-            planner_global_path.poses.resize(last_len + path.size());
+                    for(size_t i = 0 ; i < path.size();i++){
+                        planner_global_path.poses[last_len + i].pose.position.x = path[i][0];
+                        planner_global_path.poses[last_len + i].pose.position.y = path[i][1];
+                    }
+                }
 
-            for(size_t i = 0 ; i < path.size();i++){
-                planner_global_path.poses[last_len + i].pose.position.x = path[i][0];
-                planner_global_path.poses[last_len + i].pose.position.y = path[i][1];
+                break;
             }
+
         }
+
+
     }
 
 
@@ -968,6 +989,9 @@ int test_tec(int argc, char** argv) {
 
     // todo: callback may fail if topic and datetye not matched
     bool recv_new_cmd_vel = false;
+    float dynamic_forward_vel = 0.0;
+    float dynamic_rotate_vel = 0.0;
+
     common_message::Twist recv_cmd_vel_msg;
     common::Time  recv_cmd_vel_time = common::FromUnixNow();
     auto cmd_vel_sub_cb =[&recv_new_cmd_vel,&recv_cmd_vel_msg,&recv_cmd_vel_time](void* data){
@@ -999,6 +1023,15 @@ int test_tec(int argc, char** argv) {
         common_message::PoseStamped * data_ptr = static_cast<common_message::PoseStamped*>(data);
         motion_planner.requestGoal(*data_ptr);
 
+    };
+    auto planner_config_sub_cb = [&motion_planner](void* data){
+        common_message::HeaderString * data_ptr = static_cast<common_message::HeaderString*>(data);
+        control::PlannerConfig config = motion_planner.m_planner_config;
+        if(!data_ptr->data.empty() && (motion_planner.m_task_state == control::MotionPlanner::TaskState::idle || motion_planner.m_task_state == control::MotionPlanner::TaskState::finished) ){
+            nlohmann::json j = nlohmann::json::parse(data_ptr->data);
+            from_json(j,config);
+            motion_planner.m_planner_config = config;
+        }
     };
 
 
@@ -1545,6 +1578,20 @@ int test_tec(int argc, char** argv) {
 
         }
 
+        planner_status.header.frame_id = motion_planner.getTaskFrame();
+        if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::idle){
+            planner_status.data.assign("idle") ;
+        }
+        else if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::finished){
+            planner_status.data.assign("finished") ;
+        }else if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::error_path){
+            planner_status.data.assign("error_path") ;
+        }else{
+            planner_status.data.assign("running") ;
+        }
+
+        rosMessageManager.send_message("PPUB:status",&planner_status, 1, 0.1 );
+
 
         return true;
     },100*1000,1);
@@ -1658,7 +1705,7 @@ int test_tec(int argc, char** argv) {
 
 
             return false;
-        },2*1000*1000,1);
+        },10*1000*1000,1);
 
 
 
@@ -1820,9 +1867,16 @@ int test_tec(int argc, char** argv) {
 
             if((is_all_alive && is_all_initialised && is_rot_sensor_ready && ! is_any_fault)){
 
+                rosMessageManager.recv_message("SUB:control_cmd_vel",10,0.001, cmd_vel_sub_cb);
+
+                if(recv_new_cmd_vel){
+                    dynamic_forward_vel = std::sqrt(recv_cmd_vel_msg.linear.x*recv_cmd_vel_msg.linear.x + recv_cmd_vel_msg.linear.y* recv_cmd_vel_msg.linear.y );
+                    dynamic_rotate_vel = recv_cmd_vel_msg.angular.z;
+                    recv_new_cmd_vel = false;
+                    PLOGD<< "recv cmd_vel:[rotate_vel,forward_vel]: " << recv_cmd_vel_msg.angular.z << ", " << recv_cmd_vel_msg.linear.x;
+                }
                 if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::idle || motion_planner.getTaskState() == control::MotionPlanner::TaskState::finished){
 
-                    rosMessageManager.recv_message("SUB:control_cmd_vel",10,0.001, cmd_vel_sub_cb);
 
                     auto now = common::FromUnixNow();
                     if( common::ToMillSeconds(now - recv_cmd_vel_time) > cmd_vel_timeout_ms){
@@ -1834,10 +1888,7 @@ int test_tec(int argc, char** argv) {
                         recv_cmd_vel_time = now;
 
                     }
-                    if(recv_new_cmd_vel){
-                        recv_new_cmd_vel = false;
-                        PLOGD<< "recv cmd_vel:[rotate_vel,forward_vel]: " << recv_cmd_vel_msg.angular.z << ", " << recv_cmd_vel_msg.linear.x;
-                    }
+
                 }else{
                     PLOGD << "motion_planner.go()";
 
@@ -1855,6 +1906,7 @@ int test_tec(int argc, char** argv) {
                         recv_cmd_vel_msg.angular.z = command.command[2];
                         controller.setSmoothStop();
                         controller.setSteerPreference(motion_planner.m_start_wheel_angle);
+                        controller.setSteerPreference(M_PI_2f32);
 
                     }else if(command.command_type == control::MotionPlanner::CommandType::raw && command.command.size() == 4 ){
 
@@ -1868,11 +1920,13 @@ int test_tec(int argc, char** argv) {
                         PLOGD << "raw command: " << command.command[0] << ", " << command.command[1] << ", " << command.command[2] << ", " << command.command[3];
 
                         control_wheel(true, controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle() ,controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle() );
-
+                        recv_cmd_vel_msg.linear.x = 0.0;
+                        recv_cmd_vel_msg.linear.y = 0.0;
+                        recv_cmd_vel_msg.angular.z = 0.0;
 
                         return true;
                     }else{
-                        controller.setSteerPreference(0.0f);
+//                        controller.setSteerPreference(0.0f);
                         recv_cmd_vel_msg.linear.x = 0.0;
                         recv_cmd_vel_msg.linear.y = 0.0;
                         recv_cmd_vel_msg.angular.z = 0.0;
@@ -1883,6 +1937,8 @@ int test_tec(int argc, char** argv) {
 
 
 
+                send_cmd_vel = recv_cmd_vel_msg;
+                rosMessageManager.send_message("PUB:cmd_vel_planner",&send_cmd_vel,1,0.01);
 
 
 
@@ -1890,9 +1946,28 @@ int test_tec(int argc, char** argv) {
                 {
                     float vel = std::sqrt(recv_cmd_vel_msg.linear.x*recv_cmd_vel_msg.linear.x + recv_cmd_vel_msg.linear.y*recv_cmd_vel_msg.linear.y);
 
+
+
                     if (std::abs(vel) < 0.001){
+
+                        if(use_dynamic_vel){
+
+                            recv_cmd_vel_msg.angular.z = dynamic_rotate_vel;
+                            PLOGD << "dynamic, for_ward_vel: " << vel << ", rot_vel: " << recv_cmd_vel_msg.angular.z;
+
+                        }
                         controller.cmd_vel(0.0,recv_cmd_vel_msg.angular.z);
+
                     }else{
+
+
+                        if(use_dynamic_vel){
+                            float ratio =dynamic_forward_vel/vel;
+                            vel *= ratio;
+                            recv_cmd_vel_msg.angular.z *= ratio;
+
+                            PLOGD << "dynamic, for_ward_vel: " << vel << ", rot_vel: " << recv_cmd_vel_msg.angular.z;
+                        }
                         float vel_angle = std::atan2(recv_cmd_vel_msg.linear.y, recv_cmd_vel_msg.linear.x);
                         controller.cmd_vel(vel,recv_cmd_vel_msg.angular.z,vel_angle);
                     }

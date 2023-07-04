@@ -197,6 +197,7 @@ UNS8 canReceiveBatch_driver(CAN_HANDLE fd0, Message *m, int* len )
 
         for(long i = 0 ; i < size; i++){
 
+#if 0
             if(recv_vco[i].ExternFlag){
 //                MLOGW("VCI_Receive ExternFlag %d", recv_vco[i].ExternFlag);
                 return -2;
@@ -204,6 +205,9 @@ UNS8 canReceiveBatch_driver(CAN_HANDLE fd0, Message *m, int* len )
                 m[i].cob_id = recv_vco[i].ID;
 
             }
+#endif
+            m[i].cob_id = recv_vco[i].ID;
+            m[i].ext = recv_vco[i].ExternFlag;
 
             m[i].len = recv_vco[i].DataLen;
             m[i].rtr = recv_vco[i].RemoteFlag;
@@ -245,12 +249,14 @@ UNS8 canSendBatch_driver(CAN_HANDLE fd0, Message *m, int len )
 
     for(long i = 0 ; i < size; i++){
 
+#if 0
         if(m[i].ext){
             MLOGW("VCI_Receive ExternFlag %d",m[i].ext);
             return -2;
         }else{
 
         }
+#endif
 
         send_vco[i].ExternFlag = m[i].ext;
 

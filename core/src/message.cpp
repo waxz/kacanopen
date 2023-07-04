@@ -38,11 +38,25 @@
 namespace kaco {
 
 uint8_t Message::get_node_id() const {
-	return cob_id & 0x7F;
+	if (!ext){
+		return cob_id & 0x7F;
+	}else{
+		return 0xFF;
+	}
+	return 0xFF;
 }
 
 uint8_t Message::get_function_code() const {
-	return cob_id >> 7;
+
+	if(!ext){
+		return (cob_id & 0x7FF ) >> 7;
+
+	}else{
+		return 0xFF;
+
+	}
+	return 0xFF;
+
 }
 
 void Message::print() const {

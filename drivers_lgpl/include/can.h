@@ -30,7 +30,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  * @ingroup can
  */
 typedef struct {
-  UNS16 cob_id;	/**< message's ID */
+  UNS32 cob_id;	/**< message's ID */
   UNS8 rtr;		/**< remote transmission request. (0 if not rtr message, 1 if rtr message) */
   UNS8 ext;		/**< Extern. (0 if not rtr message, 1 if rtr message) */
   UNS8 len;		/**< message's length (0 to 8) */
