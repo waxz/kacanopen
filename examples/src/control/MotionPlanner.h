@@ -40,6 +40,7 @@ namespace control{
         // base actual pose to first pose in path
         float start_pose_dist = 1.0;
 
+        float first_rotate_vel_min = 0.02;
         float first_rotate_acc = 0.1;
         // adjust base direction at beginning
         float first_rotate_angle_tolerance = 0.05;
@@ -55,6 +56,7 @@ namespace control{
         float pursuit_path_angle_converge = 0.1;
 
         float pursuit_path_angle_pid_p = 0.6;
+        float pursuit_path_angle_rot_vel_max = 0.01;
 
         float pursuit_path_forward_vel = 0.6;
 
@@ -215,9 +217,11 @@ namespace control{
         // request_goal, request_path
         common::ValueStamped<std::vector<transform::Transform2d>> m_global_path;
         common::ValueStamped<std::vector<transform::Transform2d>> m_local_path;
+        std::string m_task_frame;
         void requestGoal(const common_message::PoseStamped& );
         void requestPath(const common_message::Path&);
 
+        const std::string& getTaskFrame();
 
 
         common::Time interpolate_time;

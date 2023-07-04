@@ -14,6 +14,8 @@
 #include <tf/transform_datatypes.h>
 #include <yocs_msgs/canMessageArray.h>
 
+#include <rospy_tutorials/HeaderString.h>
+
 namespace common_message{
 
 
@@ -61,6 +63,20 @@ namespace common_message{
         target.seq = data.seq;
         common::ToRos(data.stamp,target.stamp);
 
+        return target;
+    }
+
+    inline rospy_tutorials::HeaderString from_common(const HeaderString& data){
+        rospy_tutorials::HeaderString target;
+        target.header = from_common(data.header);
+        target.data = data.data;
+        return target;
+    }
+
+    inline HeaderString to_common(const rospy_tutorials::HeaderString& data){
+        HeaderString target;
+        target.header = to_common(data.header);
+        target.data = data.data;
         return target;
     }
 

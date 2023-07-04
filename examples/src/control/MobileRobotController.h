@@ -185,7 +185,7 @@ namespace control {
         float m_cmd_forward_angle = 0.0;
 
         //
-        float forward_vel_reach_thresh = 0.01;
+        float forward_vel_reach_thresh = 0.001;
         float rotate_angle_reach_thresh = 0.01;
 
         //

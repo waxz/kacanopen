@@ -53,15 +53,15 @@ namespace message{
     }
 
     long RosMessageManager::send_message(const char *channel, void *data, size_t max_num, double timeout) {
-        char * channel_str[] = {"SUB","PUB","TFL","TFB","PAR","PAW"};
-        char key_buffer[100];
+//        char * channel_str[] = {"SUB","PUB","TFL","TFB","PAR","PAW"};
+//        char key_buffer[100];
+//
+//        sprintf(key_buffer,"%s:%s",channel_str[1],channel);
 
-        sprintf(key_buffer,"%s:%s",channel_str[1],channel);
 
-
-        auto it = channel_config.find(key_buffer);
+        auto it = channel_config.find(channel);
         if(it == channel_config.end()){
-            std::cout   << key_buffer << " is not exist" << std::endl;
+            std::cout   << channel << " is not exist" << std::endl;
             return 0;
         }
         ROS_PUB_CONTAINER& pub_container = it->second.ref<ROS_PUB_CONTAINER>();
@@ -71,14 +71,14 @@ namespace message{
 
     long RosMessageManager::recv_message(const char *channel, size_t max_num, double timeout,
                                          const std::function<void(void *)> &callback) {
-        char * channel_str[] = {"SUB","PUB","TFL","TFB","PAR","PAW"};
-        char key_buffer[100];
+//        char * channel_str[] = {"SUB","PUB","TFL","TFB","PAR","PAW"};
+//        char key_buffer[100];
+//
+//        sprintf(key_buffer,"%s:%s",channel_str[0],channel);
 
-        sprintf(key_buffer,"%s:%s",channel_str[0],channel);
-
-        auto it = channel_config.find(key_buffer);
+        auto it = channel_config.find(channel);
         if(it == channel_config.end()){
-            std::cout   << key_buffer << " is not exist" << std::endl;
+            std::cout   << channel << " is not exist" << std::endl;
             return 0;
         }
         ROS_SUB_CONTAINER& sub_container = it->second.ref<ROS_SUB_CONTAINER>();
@@ -106,7 +106,7 @@ namespace message{
 
     template<typename T>
     long RosMessageManager::add_channel(const char *arg) {
-        char * channel_str[] = {"SUB","PUB","TFL","TFB","PAR","PAW"};
+        char * channel_str[] = {"SUB","PUB","PSUB","PPUB"};
 
         struct ChannelInfo{
             int type = 0;// 1: SUB, 2: PUB, 3: TF Listen , 4 TF Broadcast, 5 Param Reader, 6 Param Write
@@ -124,11 +124,11 @@ namespace message{
                 }else if(std::strcmp(ch,"PUB")== 0){
                     channelInfo.type=1;
                 }
-                else if(std::strcmp(ch,"TFL")== 0){
+                else if(std::strcmp(ch,"PSUB")== 0){
                     channelInfo.type=2;
                 }
 
-                else if(std::strcmp(ch,"TFB")== 0){
+                else if(std::strcmp(ch,"PPUB")== 0){
                     channelInfo.type =3;
                 }
                 else{
@@ -158,7 +158,7 @@ namespace message{
         split_str(arg,":", my_handler);
 
 
-        if(channelInfo.type == 0){
+        if(channelInfo.type == 0 || channelInfo.type == 2){
             char key_buffer[100];
             sprintf(key_buffer,"%s:%s",channel_str[channelInfo.type],channelInfo.topic.c_str());
             std::cout <<__FILE__ << ":" << __LINE__ << key_buffer<<std::endl;
@@ -174,7 +174,12 @@ namespace message{
 
             std::shared_ptr<ros::CallbackQueue> q = std::make_shared<ros::CallbackQueue>();
 
-            std::shared_ptr<ros::NodeHandle> n = std::make_shared<ros::NodeHandle>();
+            std::shared_ptr<ros::NodeHandle> n ;
+            if(channelInfo.type == 0 ){
+                n = std::make_shared<ros::NodeHandle>();
+            }else {
+                n = std::make_shared<ros::NodeHandle>("~");
+            }
             std::shared_ptr<ros::Subscriber> sub = std::make_shared<ros::Subscriber>();
 
 
@@ -227,7 +232,7 @@ namespace message{
             ops.template init<ROS_MSG_TYPE>(channelInfo.topic, channelInfo.queue_size, cb);
             ops.allow_concurrent_callbacks = true;
             *sub = n->subscribe(ops);
-        }else if(channelInfo.type == 1){
+        }else if(channelInfo.type == 1 ||channelInfo.type == 3 ){
             char key_buffer[100];
             sprintf(key_buffer,"%s:%s",channel_str[channelInfo.type],channelInfo.topic.c_str());
 
@@ -240,7 +245,12 @@ namespace message{
 
             }
 
-            std::shared_ptr<ros::NodeHandle> n = std::make_shared<ros::NodeHandle>();
+            std::shared_ptr<ros::NodeHandle> n ;
+            if(channelInfo.type == 1 ){
+                n = std::make_shared<ros::NodeHandle>();
+            }else {
+                n = std::make_shared<ros::NodeHandle>("~");
+            }
             std::shared_ptr<ros::Publisher> pub = std::make_shared<ros::Publisher>();
 
             using ROS_MSG_TYPE = decltype(common_message::from_common(std::declval<const T&>()));
@@ -282,7 +292,7 @@ namespace message{
         sprintf(key_buffer,"%s",channel_str[2]);
         auto it = channel_config.find(key_buffer);
         if(it != channel_config.end()){
-            std::cout   << key_buffer << " is already exist" << std::endl;
+//            std::cout   << key_buffer << " is already exist" << std::endl;
         }else{
 
             common::wild_ptr  channel_ptr;
@@ -342,6 +352,8 @@ namespace message{
     template long RosMessageManager::add_channel<common_message::Twist>(const char *);
     template long RosMessageManager::add_channel<common_message::CanMessageArray>(const char *);
     template long RosMessageManager::add_channel<common_message::Path>(const char *);
+    template long RosMessageManager::add_channel<common_message::PoseStamped>(const char *);
+    template long RosMessageManager::add_channel<common_message::HeaderString>(const char *);
 
 //    template long RosMessageManager::create_sub<common_message::Twist>(char * , int );
 
