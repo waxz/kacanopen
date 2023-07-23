@@ -362,11 +362,18 @@ constexpr auto PlannerConfig_properties = std::make_tuple(
         common::property(&control::PlannerConfig::first_rotate_vel, "first_rotate_vel"),
 
 
+        //first_track_dist
+        common::property(&control::PlannerConfig::first_track_dist, "first_track_dist"),
+
+        //max_track_dist
+        common::property(&control::PlannerConfig::max_track_dist, "max_track_dist"),
 
         common::property(&control::PlannerConfig::first_rotate_vel_min, "first_rotate_vel_min"),
 
 
         common::property(&control::PlannerConfig::first_rotate_acc, "first_rotate_acc"),
+
+        common::property(&control::PlannerConfig::pursuit_path_forward_acc, "pursuit_path_forward_acc"),
 
         common::property(&control::PlannerConfig::pursuit_path_interpolate_step, "pursuit_path_interpolate_step"),
         common::property(&control::PlannerConfig::pursuit_path_angle_converge, "pursuit_path_angle_converge"),
@@ -509,7 +516,7 @@ struct PathConfig{
 
     bool run = false;
     bool fix_direction = false;
-    float direction = 0.0;
+    double direction = 0.0;
     std::vector<std::array<std::array<float,2>,4>> path;
 
 };
@@ -572,7 +579,7 @@ int test_tec(int argc, char** argv) {
 
 
     bool enable_fix_command = false;
-    std::vector<float> command_array;
+    std::vector<float> command_array{0.0f, 0.0f, 0.0f, 0.0f};
 
     int cmd_vel_timeout_ms = 100;
     int feedback_timeout_ms = 100;
@@ -620,9 +627,8 @@ int test_tec(int argc, char** argv) {
 //               | lyra::opt(rotate_angle_vel,"rotate_angle_vel")["-R"]["--rotate_angle_vel"]("rotate_angle_vel")
 
                //---
-               | lyra::group().sequential()
-               | lyra::opt(enable_fix_command, "ON|OFF")["--command"]
-               | lyra::arg(command_array, "command_array")
+             | lyra::opt( enable_fix_command)["-C"]["--command"]("enable_fix_command")
+
                //---
                | lyra::arg(command, "command")("The command, and arguments, to attempt to run.")
                ;
@@ -644,6 +650,12 @@ int test_tec(int argc, char** argv) {
 
     if(config_file.empty()){
         std::cout << "config_file not set" << std::endl;
+        return 0;
+
+    }
+
+    if(planner_config_file.empty()){
+        std::cout << "planner_config_file not set" << std::endl;
         return 0;
 
     }
@@ -957,8 +969,13 @@ int test_tec(int argc, char** argv) {
     if(!path_config.empty()){
         std::vector<std::array<float,2>>  path;
         float step = 0.1;
+        common_message::PoseStamped pose;
+
         for(auto& P : path_config){
             if (P.run){
+
+                transform::toQuaternion(pose.pose.orientation.w,pose.pose.orientation.x,pose.pose.orientation.y,pose.pose.orientation.z, P.direction);
+
                 auto &p1 = P.path;
                 for(auto & p2:p1){
 
@@ -968,7 +985,7 @@ int test_tec(int argc, char** argv) {
                     float PD[2] = {p2[3][0],p2[3][1]};
                     math::buildBezier(PA, PB,PC, PD, step,path);
                     size_t last_len = planner_global_path.poses.size();
-                    planner_global_path.poses.resize(last_len + path.size());
+                    planner_global_path.poses.resize(last_len + path.size(),pose);
 
                     for(size_t i = 0 ; i < path.size();i++){
                         planner_global_path.poses[last_len + i].pose.position.x = path[i][0];
@@ -1126,6 +1143,9 @@ int test_tec(int argc, char** argv) {
     auto initialise_forward_driver = [&](size_t driver_id){
         PLOGD << "initialise_forward_driver: " << driver_id;
 
+        if(forward_driver_initializer_msg.empty()){
+            return ;
+        }
         forward_driver_initializer_msg[0].data[1] = driver_id;
 
         for(size_t i = 1; i < forward_driver_initializer_msg.size();i++){
@@ -1139,6 +1159,9 @@ int test_tec(int argc, char** argv) {
     auto initialise_rotate_driver = [&](size_t driver_id){
 
         PLOGD << "initialise_rotate_driver: " << driver_id;
+        if(rotate_driver_initializer_msg.empty()){
+            return ;
+        }
         rotate_driver_initializer_msg[0].data[1] = driver_id;
 
         for(size_t i = 1; i < rotate_driver_initializer_msg.size();i++){
@@ -1236,11 +1259,9 @@ int test_tec(int argc, char** argv) {
 
 
         *(int*)(&driver_command_msg_channel_1[0].data[0]) = forward_vel_1 / SteerConfigArray[0].forward_speed_k;
-        *(int*)(&driver_command_msg_channel_1[1].data[0]) = (rotate_angle_1 - SteerConfigArray[0].rot_angle_b + SteerConfigArray[0].rot_angle_abs_offset)/SteerConfigArray[0].rot_angle_k + SteerConfigArray[0].rot_angle_abs_offset;
-
+        *(int*)(&driver_command_msg_channel_1[1].data[0]) = (rotate_angle_1 - SteerConfigArray[0].rot_angle_b - SteerConfigArray[0].rot_angle_abs_offset)/SteerConfigArray[0].rot_angle_k;
         *(int*)(&driver_command_msg_channel_2[0].data[0]) = forward_vel_2 / SteerConfigArray[1].forward_speed_k;
-        *(int*)(&driver_command_msg_channel_2[1].data[0]) = (rotate_angle_2 - SteerConfigArray[1].rot_angle_b + SteerConfigArray[1].rot_angle_abs_offset)/SteerConfigArray[1].rot_angle_k + SteerConfigArray[1].rot_angle_abs_offset;
-
+        *(int*)(&driver_command_msg_channel_2[1].data[0]) = (rotate_angle_2 - SteerConfigArray[1].rot_angle_b - SteerConfigArray[1].rot_angle_abs_offset)/SteerConfigArray[1].rot_angle_k;
         PLOGD << "send can data to channel 1";
         driver_command_msg_channel_1[0].print();
         driver_command_msg_channel_1[1].print();
@@ -1586,6 +1607,8 @@ int test_tec(int argc, char** argv) {
             planner_status.data.assign("finished") ;
         }else if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::error_path){
             planner_status.data.assign("error_path") ;
+        }else if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::off_path){
+            planner_status.data.assign("off_path") ;
         }else{
             planner_status.data.assign("running") ;
         }
@@ -1705,7 +1728,7 @@ int test_tec(int argc, char** argv) {
 
 
             return false;
-        },10*1000*1000,1);
+        },50*1000,1);
 
 
 
@@ -1874,8 +1897,11 @@ int test_tec(int argc, char** argv) {
                     dynamic_rotate_vel = recv_cmd_vel_msg.angular.z;
                     recv_new_cmd_vel = false;
                     PLOGD<< "recv cmd_vel:[rotate_vel,forward_vel]: " << recv_cmd_vel_msg.angular.z << ", " << recv_cmd_vel_msg.linear.x;
+
+
                 }
-                if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::idle || motion_planner.getTaskState() == control::MotionPlanner::TaskState::finished){
+
+                if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::idle || motion_planner.getTaskState() == control::MotionPlanner::TaskState::finished || motion_planner.getTaskState() == control::MotionPlanner::TaskState::error_path || motion_planner.getTaskState() == control::MotionPlanner::TaskState::off_path ){
 
 
                     auto now = common::FromUnixNow();
@@ -1889,6 +1915,48 @@ int test_tec(int argc, char** argv) {
 
                     }
 
+                    {
+                        controller.setPrefer(true);
+
+                        if(std::abs(recv_cmd_vel_msg.linear.y) < std::abs(recv_cmd_vel_msg.linear.x)) {
+                            controller.setSteerPreference(0.0f);
+                        }
+                        else if(recv_cmd_vel_msg.linear.y > 0.001){
+                            controller.setSteerPreference(M_PI_2f32);
+
+                        }else if(recv_cmd_vel_msg.linear.y < -0.001){
+                            controller.setSteerPreference(-M_PI_2f32);
+
+                        }else{
+                            controller.setSteerPreference(0.0f);
+                        }
+
+#if 0
+
+
+                        if (std::abs(vel) < 0.00001){
+
+                            controller.setSteerPreference(0.0f);
+
+                        }else{
+
+                            float vel_angle = std::atan2(recv_cmd_vel_msg.linear.y, recv_cmd_vel_msg.linear.x);
+
+                            if(vel_angle >0.0  && vel_angle <= M_PI_2f32 ){
+                                controller.setSteerPreference(M_PI_2f32);
+                            }else if(vel_angle > M_PI_2f32){
+                                controller.setSteerPreference(-M_PI_2f32);
+                            }else if(vel_angle >= -M_PI_2f32 && vel_angle < 0.0){
+                                controller.setSteerPreference(-M_PI_2f32);
+                            }else if(vel_angle < -M_PI_2f32){
+                                controller.setSteerPreference(M_PI_2f32);
+                            }else{
+                                controller.setSteerPreference(0.0f);
+                            }
+                        }
+#endif
+                    }
+
                 }else{
                     PLOGD << "motion_planner.go()";
 
@@ -1897,6 +1965,19 @@ int test_tec(int argc, char** argv) {
                     common::Time t1 = common::FromUnixNow();
                     auto& command = motion_planner.go();
                     PLOGD << "go_time: " << common::ToMillSeconds(common::FromUnixNow() - t1) << " ms";
+
+                    {
+
+                        if(!motion_planner.m_local_path.value.empty()){
+                            size_t pose_num = motion_planner.m_local_path.value.size();
+                            planner_local_path.poses.resize(pose_num);
+                            for(size_t i = 0 ; i < pose_num;i++){
+                                planner_local_path.poses[i].pose = common_message::Transform2dToPose(motion_planner.m_local_path.value[i]);
+                            }
+                            planner_local_path.header.stamp = common::FromUnixNow();
+                            rosMessageManager.send_message("PPUB:local_path",&planner_local_path, 1, 0.1 );
+                        }
+                    }
                     if(command.command_type == control::MotionPlanner::CommandType::cmd_vel && command.command.size() == 3 ){
 
                         PLOGD << "cmd_vel: " << command.command[0] << ", " << command.command[1] << ", " << command.command[2];
@@ -1905,8 +1986,9 @@ int test_tec(int argc, char** argv) {
                         recv_cmd_vel_msg.linear.y = command.command[1];
                         recv_cmd_vel_msg.angular.z = command.command[2];
                         controller.setSmoothStop();
-                        controller.setSteerPreference(motion_planner.m_start_wheel_angle);
-                        controller.setSteerPreference(M_PI_2f32);
+                        controller.setPrefer(motion_planner.use_prefer_steer_angle());
+
+                        controller.setSteerPreference(motion_planner.get_prefer_steer_angle());
 
                     }else if(command.command_type == control::MotionPlanner::CommandType::raw && command.command.size() == 4 ){
 
@@ -1948,11 +2030,16 @@ int test_tec(int argc, char** argv) {
 
 
 
-                    if (std::abs(vel) < 0.001){
+                    if (std::abs(vel) < 0.00001){
 
                         if(use_dynamic_vel){
-
-                            recv_cmd_vel_msg.angular.z = dynamic_rotate_vel;
+                            float ratio = 1.0;
+                            if(std::abs(recv_cmd_vel_msg.angular.z) > 0.0001){
+                                ratio = std::min(1.0f, std::abs(dynamic_rotate_vel)/std::abs(recv_cmd_vel_msg.angular.z));
+                                recv_cmd_vel_msg.angular.z *= ratio;
+                            }else{
+                                recv_cmd_vel_msg.angular.z = 0.0f;
+                            }
                             PLOGD << "dynamic, for_ward_vel: " << vel << ", rot_vel: " << recv_cmd_vel_msg.angular.z;
 
                         }
@@ -1962,7 +2049,10 @@ int test_tec(int argc, char** argv) {
 
 
                         if(use_dynamic_vel){
-                            float ratio =dynamic_forward_vel/vel;
+                            float ratio = 1.0;
+
+                            ratio = std::min(1.0f,dynamic_forward_vel/vel);
+
                             vel *= ratio;
                             recv_cmd_vel_msg.angular.z *= ratio;
 
@@ -2018,12 +2108,17 @@ int test_tec(int argc, char** argv) {
     }else{
         PLOGD << "add fix command";
 
-        taskManager.addTask([&control_wheel,&command_array,&mqttMessageManager,&mqtt_sub_topic,&lua_cb]{
+        taskManager.addTask([&controller, &control_wheel,&command_array,&mqttMessageManager,&mqtt_sub_topic,&lua_cb]{
 
             mqttMessageManager.recv_message(mqtt_sub_topic.c_str(),10,0.01, lua_cb);
 
             command_array[1] = std::max(std::min(1.918888889f, command_array[1]),-1.918888889f);
             command_array[3] = std::max(std::min(1.918888889f, command_array[3]),-1.918888889f);
+
+            controller.m_steer_wheel[0].getCommandForwardVel() = command_array[0];
+            controller.m_steer_wheel[0].getCommandForwardVel() = command_array[1];
+            controller.m_steer_wheel[1].getCommandForwardVel() = command_array[2];
+            controller.m_steer_wheel[1].getCommandForwardVel() = command_array[3];
 
             PLOGD << "send fix command: " << command_array[0] << ", " << command_array[1] << ", " <<command_array[2] << ", " << command_array[3];
 

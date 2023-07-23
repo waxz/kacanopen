@@ -40,6 +40,8 @@ namespace control{
         // base actual pose to first pose in path
         float start_pose_dist = 1.0;
 
+        float first_track_dist = 0.1;
+        float max_track_dist = 0.5;
         float first_rotate_vel_min = 0.02;
         float first_rotate_acc = 0.1;
         // adjust base direction at beginning
@@ -60,6 +62,10 @@ namespace control{
 
         float pursuit_path_forward_vel = 0.6;
 
+        float speed_up_acc = 0.3;
+        float speed_down_acc = 0.3;
+
+        float pursuit_path_forward_acc = 0.3;
 
 
         // when to start pursuit_goal
@@ -139,7 +145,7 @@ namespace control{
 
 
         enum class TaskState{
-
+            off_path = -2,
             error_path = -1,
             idle = 0,
             running_init = 1,
@@ -205,6 +211,12 @@ namespace control{
         // /odom
         void updateOdom(const common_message::Odometry& odom);
 
+        //
+        size_t m_path_node_id = 0;
+        float m_path_node_id_interpolate = 0.0;
+        size_t m_closest_path_node_id = 0;
+
+
         void reset();
 
         void stop();
@@ -249,6 +261,25 @@ namespace control{
         // go
         const Command& go();
 
+        // track path info
+        struct TackPointInfo{
+            // index in global_path
+            size_t node_id = 0;
+
+            // segment id, use for check
+            size_t segment_id = 0;
+            // absolute yaw in map
+            float abs_yaw = 0.0f;
+            // yaw change compare to last node
+            float rel_to_last_yaw = 0.0f;
+            // compare to base
+            float rel_to_base_yaw = 0.0f;
+
+            // dist from start
+            float dist_from_start = 0.0;
+
+        };
+        std::vector<TackPointInfo> m_track_path_info;
 
 
 
@@ -299,11 +330,14 @@ namespace control{
         bool prepare() override;
 
         void resetPlanner() override;
-        size_t m_path_node_id = 0;
-        float m_path_node_id_interpolate = 0.0;
+
         bool createLocalPath() override;
         bool pursuit_path() override;
         bool pursuit_goal() override;
+
+        bool use_prefer_steer_angle();
+        float m_prefer_steer_angle = 0.0f;
+        float get_prefer_steer_angle();
 
         bool createLocalPath_v1();
         bool createLocalPath_v2();
