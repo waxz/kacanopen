@@ -227,6 +227,9 @@ void Core::received_message(const Message& message) {
 		}
 	}
 
+    if(message.ext){
+        return;
+    }
 	// sencondly process known message types
 	switch (message.get_function_code()) {
 		
