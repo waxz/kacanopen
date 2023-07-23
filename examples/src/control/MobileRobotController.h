@@ -108,7 +108,12 @@ namespace control {
 
 
         // transform command to motor frame
-        void createCommand(float steer_preference_angle);
+        void createCommand();
+        void setPrefer(bool prefer);
+        void setPreferAngle(float prefer_angle);
+
+        bool use_prefer = false;
+        float m_prefer_angle = 0.0f;
     };
 
 
@@ -188,6 +193,8 @@ namespace control {
         float forward_vel_reach_thresh = 0.001;
         float rotate_angle_reach_thresh = 0.01;
 
+        bool wheel_angle_reach = false;
+
         //
         float rotate_constrain_thresh = 0.01;
 
@@ -245,10 +252,12 @@ namespace control {
 
         std::array<SteerWheelBase,2> m_steer_wheel;
         float constrain_angle = 0.0;
-        float m_prefer_steer_angle = 0.0;
+        float m_prefer_steer_angle = 0.0f;
+        bool m_use_prefer_angle = false;
 
     public:
 
+        void setPrefer(bool prefer);
         void setSteerPreference(float angle);
         void reset() override;
 

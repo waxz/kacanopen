@@ -21,7 +21,15 @@ namespace control {
 
     void SteerWheelBase::config() {
     }
-    void SteerWheelBase::createCommand(float steer_preference_angle) {
+
+    void SteerWheelBase::setPrefer(bool prefer) {
+        use_prefer = prefer;
+    }
+
+    void SteerWheelBase::setPreferAngle(float prefer_angle) {
+        m_prefer_angle = prefer_angle;
+    }
+    void SteerWheelBase::createCommand() {
         command_forward_vel = target_forward_vel;
         command_forward_vel = std::min(std::max(command_forward_vel, -max_forward_vel), max_forward_vel);
 
@@ -68,13 +76,10 @@ namespace control {
             // check startup and stop
 
 
-            if(
-//                    (std::abs(command_forward_vel) > 0.005   || std::abs(command_forward_vel) <  1e-6)&&
-                    std::abs(command_forward_vel) > 0.005&&
-                std::abs(actual_forward_vel) < 0.01){
-
+            if( use_prefer ){
+                PLOGD << "prefer_zero : " << use_prefer;
                 // check change to zero
-                preference_angle = 0.0f;
+                preference_angle = m_prefer_angle;
 
             }else{
                 preference_angle = actual_angle_in_motor;
@@ -110,7 +115,7 @@ namespace control {
 
         }else  if(target_angle_in_motor > max_rot_angle ){
 
-            command_rotate_angle  = target_angle_in_motor + M_PIf32;
+            command_rotate_angle  = target_angle_in_motor - M_PIf32;
             command_forward_vel = -command_forward_vel;
             PLOGD << "command_rotate_angle: " << command_rotate_angle ;
 
@@ -181,7 +186,6 @@ namespace control {
                 m_steer_wheel[1].target_rot_angle = m_cmd_forward_angle;
                 m_steer_wheel[0].target_forward_vel = 0.0f;
                 m_steer_wheel[1].target_forward_vel = 0.0f;
-                return;
             } else {
 
                 float command_rotate_radius = 0.5f * std::sqrt(
@@ -213,6 +217,8 @@ namespace control {
                 }
 
             }
+            return;
+
 
         }
 
@@ -280,7 +286,6 @@ namespace control {
             m_steer_wheel[1].target_rot_angle = m_cmd_forward_angle;
             m_steer_wheel[0].target_forward_vel = m_cmd_forward_vel;
             m_steer_wheel[1].target_forward_vel = m_cmd_forward_vel;
-            return;
         }
 
 
@@ -695,7 +700,11 @@ namespace control {
 
 
         for(size_t i = 0 ; i < m_steer_wheel.size(); i++){
-            m_steer_wheel[i].createCommand(m_prefer_steer_angle);
+            m_steer_wheel[i].setPrefer(m_use_prefer_angle);
+
+            m_steer_wheel[i].setPreferAngle(m_prefer_steer_angle);
+
+            m_steer_wheel[i].createCommand();
         }
 
 
@@ -826,6 +835,8 @@ namespace control {
                 move_state_type = MoveType::Stop;
                 move_state_flag = 0;
             }
+            wheel_angle_reach = false;
+
             if(move_state_type != move_cmd_type){
                 interpolate_time = common::FromUnixNow();
                 interpolate_time_step_0 = common::FromUnixNow();
@@ -862,6 +873,7 @@ namespace control {
                     move_state_type = MoveType::Stop;
                     move_state_flag = 0;
                 }
+
             }else{
                 move_state_type = move_cmd_type;
                 move_state_flag = 0;
@@ -883,10 +895,13 @@ namespace control {
                     move_state_type = MoveType::Stop;
                     move_state_flag = 0;
                 }
+
             }else{
                 move_state_type = move_cmd_type;
                 move_state_flag = 0;
             }
+            wheel_angle_reach = false;
+
             if(move_state_type != move_cmd_type){
                 interpolate_time = common::FromUnixNow();
                 interpolate_time_step_0 = common::FromUnixNow();
@@ -1038,9 +1053,15 @@ namespace control {
                 need_rotate_sync = false;
             }
 
+
+            bool temp_wheel_angle_reach = std::abs(rot_control_diff_1) < rotate_angle_reach_thresh && std::abs(rot_control_diff_2) < rotate_angle_reach_thresh;
+            if(temp_wheel_angle_reach){
+                wheel_angle_reach = true;
+            }
+
             float slow_ratio = 1.0;
 
-            if(need_rotate_sync){
+            if(!wheel_angle_reach){
                 // direct rotate, keep 0 vel
 
                 bool need_update = move_state_flag == 0
@@ -1260,11 +1281,10 @@ namespace control {
             // todo: revises rotate : steer angle sync
             PLOGD << "move_state_type: " << "Inplace_Rotate";
 
-            if( std::abs(rot_control_diff_1) < rotate_angle_reach_thresh && std::abs(rot_control_diff_2) < rotate_angle_reach_thresh){
-                need_rotate_sync = false;
-            }
+            wheel_angle_reach = std::abs(rot_control_diff_1) < rotate_angle_reach_thresh && std::abs(rot_control_diff_2) < rotate_angle_reach_thresh;
 
-            if(need_rotate_sync){
+
+            if(!wheel_angle_reach){
                 // direct rotate, keep 0 vel
 
                 bool need_update = move_state_flag == 0
@@ -1718,6 +1738,9 @@ namespace control {
 
     }
 
+    void DoubleSteerController::setPrefer(bool prefer) {
+        m_use_prefer_angle = prefer;
+    }
     void DoubleSteerController::setSteerPreference(float angle) {
         m_prefer_steer_angle = angle;
     }
@@ -1742,13 +1765,21 @@ namespace control {
 
         common::Time now = common::FromUnixNow();
 
+        float acc_ratio = 1.0f;
+#if 1
+        if(std::abs(forward_vel_1) < 0.06 || std::abs(forward_vel_1) < 0.06){
+
+            acc_ratio = 10.f;
+        }
+#endif
+
         {
             m_steer_wheel[0].target_forward_vel = forward_vel_1;
             m_steer_wheel[0].target_rot_angle =  m_steer_wheel[0].enable_rot * rot_angle_1;
 
 
             float update_s = common::ToMicroSeconds(now - m_steer_wheel[0].time) * 1e-6;
-            float vel_step = update_s * m_steer_wheel[0].max_forward_acc;
+            float vel_step = update_s * m_steer_wheel[0].max_forward_acc*acc_ratio;
             m_steer_wheel[0].time = now;
 
 
@@ -1763,7 +1794,7 @@ namespace control {
 
             m_steer_wheel[0].actual_forward_vel = vel_1;//  +common::uniform_real<float>(-0.005f,0.05f);
 
-            float rot_step = 0.01;
+            float rot_step = update_s * m_steer_wheel[0].max_rot_vel;
 
             float rot_ratio_1 =
                     rot_step / std::abs(m_steer_wheel[0].target_rot_angle - m_steer_wheel[0].actual_rot_angle);
@@ -1780,7 +1811,7 @@ namespace control {
             m_steer_wheel[1].target_rot_angle = m_steer_wheel[1].enable_rot * rot_angle_2;
 
             float update_s = common::ToMicroSeconds(now - m_steer_wheel[1].time) * 1e-6;
-            float vel_step = update_s * m_steer_wheel[1].max_forward_acc;
+            float vel_step = update_s * m_steer_wheel[1].max_forward_acc*acc_ratio;
             m_steer_wheel[1].time = now;
 
             float vel_ratio_1 =
@@ -1794,7 +1825,7 @@ namespace control {
 
             m_steer_wheel[1].actual_forward_vel = vel_1;// + common::uniform_real<float>(-0.005f,0.05f);
 
-            float rot_step = 0.01;
+            float rot_step = update_s * m_steer_wheel[1].max_rot_vel;
 
             float rot_ratio_1 =
                     rot_step / std::abs(m_steer_wheel[1].target_rot_angle - m_steer_wheel[1].actual_rot_angle);
@@ -1810,6 +1841,22 @@ namespace control {
 
         m_steer_wheel[1].steer_constrain_vel =
                 m_steer_wheel[1].actual_forward_vel * std::cos(m_steer_wheel[1].actual_rot_angle - constrain_angle);
+#if 0
+        if(std::abs(forward_vel_1) < 0.001 || std::abs(forward_vel_1) < 0.001){
+
+
+            if(std::abs(m_steer_wheel[0].actual_forward_vel) <= m_steer_wheel[0].min_forward_vel || std::abs(m_steer_wheel[1].actual_forward_vel) <= m_steer_wheel[1].min_forward_vel) {
+                m_steer_wheel[0].actual_forward_vel = 0.0;
+                m_steer_wheel[1].actual_forward_vel = 0.0;
+            }else{
+                m_steer_wheel[0].actual_forward_vel = (m_steer_wheel[0].actual_forward_vel > 0.0) ? m_steer_wheel[0].min_forward_vel*0.95f : -m_steer_wheel[0].min_forward_vel*0.95f ;
+                m_steer_wheel[1].actual_forward_vel = (m_steer_wheel[1].actual_forward_vel > 0.0) ? m_steer_wheel[1].min_forward_vel*0.95f : -m_steer_wheel[1].min_forward_vel*0.95f ;
+
+            }
+
+
+        }
+#endif
 
         // compute odom
 
