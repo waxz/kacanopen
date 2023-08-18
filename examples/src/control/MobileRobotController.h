@@ -49,6 +49,7 @@ namespace control {
 
 
         // actual
+        size_t flag = 0;
         float actual_rot_angle = 0.0;
         float actual_forward_acc = 0.0;
         float actual_rot_acc = 0.0;
@@ -81,29 +82,14 @@ namespace control {
         }
 
         void reset() {
-            createCommand(0.0, 0.0);
         }
 
         ///actual_rot_angle = mount_position_yaw + enable_rot*rot_angle;
         /// \param forward_vel  : sensor feedback forward velocity
         /// \param rot_angle  : sensor feedback angle
         /// \return
-        bool updateState(float forward_vel, float rot_angle) {
-            actual_forward_vel = forward_vel;
-            actual_rot_angle = rot_angle;
-            actual_rot_angle = angle_normalise_zero(actual_rot_angle);
-            return enable_rot;
-        }
+        bool updateState(float forward_vel, float rot_angle) ;
 
-        ///
-        /// \param forward_vel
-        /// \param rot_angle
-        void createCommand(float forward_vel, float rot_angle) {
-            command_forward_vel = forward_vel;
-            command_rotate_angle = rot_angle ;
-            command_rotate_angle = std::min(std::max(command_rotate_angle, -max_rot_angle), max_rot_angle);
-            command_forward_vel = std::min(std::max(command_forward_vel, -max_forward_vel), max_forward_vel);
-        }
 
 
 
@@ -147,7 +133,7 @@ namespace control {
         // time stamp
         common::Time time;
 
-        float control_period_sec = 0.01;
+        float control_period_sec = 0.02;
 
         bool control_need_forward_zero = false;
         bool control_need_forward_sync = false;

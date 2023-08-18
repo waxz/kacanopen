@@ -62,6 +62,23 @@ namespace control{
 
         float pursuit_path_forward_vel = 0.6;
 
+//        float follow_line_vel = 0.6;
+
+        // virtual path width, single side
+        float pursuit_path_width = 0.1;
+
+        // off path distance, single side
+        float off_path_dist = 0.2;
+
+        // steer rotate vel
+        float steer_rotate_vel = 0.5;
+        // follow path
+        float follow_dist_min = 0.2f;
+        float follow_dist_max = 0.5f;
+
+
+        float curve_interpolate_dist = 1.0f;
+
         float speed_up_acc = 0.3;
         float speed_down_acc = 0.3;
 
@@ -89,6 +106,7 @@ namespace control{
 
         float pursuit_goal_final_forward_vel_pid_p = 0.1;
 
+        float pursuit_goal_angle_rot_vel_max = 0.001;
         float pursuit_goal_final_forward_vel_min = 0.01;
         float pursuit_goal_final_forward_vel_max = 0.05;
 
@@ -149,25 +167,51 @@ namespace control{
             error_path = -1,
             idle = 0,
             running_init = 1,
-            running_adjust_rotate = 2,
-            running_adjust_prepare = 3,
-            running_pursuit_path = 4,
-            running_pursuit_goal = 5,
-            suspended = 5,
-            finished = 6
+
+            // only rotate
+            running_rotate_init = 2,
+            running_rotate = 3,
+
+
+            // rotate in pursuit path
+            running_adjust_rotate = 4,
+            running_adjust_prepare = 5,
+            running_pursuit_path = 6,
+            running_pursuit_goal = 7,
+            suspended = 8,
+            finished = 9
         };
 
 
         enum class PlannerState{
-            uninitialised = 0,
-            global_plan_ok = 1,
-            local_plan_ok = 2 ,
-            target_reached = 3
+            // task start
+            idle = 0,
+            // base go to the closest node on path from start. if tolerance is reached, state change to follow_path
+            init_to_path = 1,
+
+            // dynamic switch to follow_line or follow curve
+            follow_path = 2,
+
+            //curve
+            follow_curve =3,
+
+            return_to_curve = 4,
+
+            // follow line path with width
+            follow_line = 5 ,
+            // follow line path, error beyond tolerance, must return to path
+            return_to_line = 6,
+
+            follow_turn = 7,
+
+            follow_goal = 8
         };
+
+        PlannerState m_planner_state = PlannerState::idle;
 
         enum class CommandType{
             uninitialised = 0,
-            raw = 1,
+            steer = 1,
             cmd_vel = 2
         };
 
@@ -176,9 +220,30 @@ namespace control{
             // cmd_vel: [vx,vy,rz]
             // raw: [forward_vel_1, rotate_angle_1, forward_vel_2, rotate_angle_2]
             std::vector<float> command;
+            void setSteer(float rotate_angle){
+
+                command_type = CommandType::steer;
+                command.resize(1);
+                command[0] = rotate_angle;
+
+            }
+            void setCmd(float vx, float vy, float rz){
+
+                command_type = CommandType::cmd_vel;
+                command.resize(3);
+                std::fill(command.begin(), command.end(),0.0f);
+                command[0] = vx;
+                command[1] = vy;
+                command[2] = rz;
+
+            }
+
         };
 
         Command m_command;
+        const Command& getCommand()const{
+            return m_command;
+        }
         // base interface
 
         // task manager
@@ -230,7 +295,15 @@ namespace control{
         common::ValueStamped<std::vector<transform::Transform2d>> m_global_path;
         common::ValueStamped<std::vector<transform::Transform2d>> m_local_path;
         std::string m_task_frame;
+
+        // create global path from request_goal
+        // makesure global_path contains at least two nodes, two nodes represent path direction
+        // check target tolerance, skip task
         void requestGoal(const common_message::PoseStamped& );
+
+        // create global path from request_path
+        // makesure global_path contains at least two nodes, two nodes represent path direction
+        // check target tolerance, skip task
         void requestPath(const common_message::Path&);
 
         const std::string& getTaskFrame();
@@ -239,6 +312,14 @@ namespace control{
         common::Time interpolate_time;
         common::Time interpolate_time_step_0;
         common::Time interpolate_time_step_1;
+
+        // base velocity
+        float m_forward_vel = 0.0f;
+        float m_forward_diff = 0.0f;
+
+        float m_forward_angle = 0.0f;
+        float m_rotate_vel = 0.0f;
+        float m_rotate_diff = 0.0f;
 
 
         virtual bool checkPath() = 0;
@@ -259,33 +340,88 @@ namespace control{
 
 
         // go
-        const Command& go();
+        void go();
 
         // track path info
-        struct TackPointInfo{
-            // index in global_path
-            size_t node_id = 0;
+        struct TrackPointInfo{
 
-            // segment id, use for check
+            // node pose in path direction
+            // the x-axis indicates path direction
+            // the y-axis can be used to compute segmentation and robot control error
+            transform::Transform2d pose;
+
+            // segment id, indicate segment type change
+            // line segment
+            // left turn curve segment
+            // right turn curve segment
             size_t segment_id = 0;
-            // absolute yaw in map
-            float abs_yaw = 0.0f;
-            // yaw change compare to last node
-            float rel_to_last_yaw = 0.0f;
-            // compare to base
-            float rel_to_base_yaw = 0.0f;
 
-            // dist from start
+            size_t segment_end_id = 0;
+
+            // segment type
+            // 0: line
+            // 1: left turn curve
+            // -1: right turn curve
+            int segment_type = 0;
+
+            float direction = 0.0;
+
+            // direction from last node
+            // 0.0 : line segment
+            // otherwise: curve segment
+            // positive : turn left
+            // negative: turn right
+            float direction_change_from_last = 0.0;
+
+            float direction_change_divide_dist = 0.0;
+
+            // planned forward vel base on direction change speed
+            float forward_vel = 0.0;
+            // planned wheel's steer vel base on direction change speed
+            float steer_vel = 0.0;
+            // planned base rotate vel base on direction change speed
+            float rotate_vel = 0.0;
+
+
+            // relative dist compare to last node
+            float dist_from_last = 0.0;
+
+            // distance accumulation from the first node
             float dist_from_start = 0.0;
 
+            // distance to end node
+            float dist_to_end = 0.0;
+
+            // distance_to_segment_end
+            float dist_to_segment_end = 0.0f;
+
+
+            // interpolate node
+            bool interpolate_valid = false;
+            transform::Transform2d interpolate_node_in;
+            transform::Transform2d interpolate_node_out;
+            size_t interpolate_node_in_id = 0 ;
+            size_t interpolate_node_out_id = 0 ;
+
         };
-        std::vector<TackPointInfo> m_track_path_info;
+        std::vector<TrackPointInfo> m_track_path_info;
 
 
+        std::string m_status_msg;
+        const std::string& getStatusMsg()const{
+            return m_status_msg;
+        }
 
         // plan path result
         void getGlobalPath();
         void getLocalPath();
+
+        // compute forward_vel, forward_angle and rotate_vel to target node
+        virtual bool goToNode(float node_id_float) = 0;
+        virtual bool goToNode(size_t node_id) = 0;
+        virtual bool gotoNode(const transform::Transform2d& node) = 0;
+
+        virtual bool followLocalPath() = 0;
 
 
         // plan command result
@@ -319,13 +455,26 @@ namespace control{
 
     struct DoubleSteerMotionPlanner: public MotionPlanner{
 
+        DoubleSteerController m_driver_controller;
 
         void initBase(const std::vector<SteerWheelBase>& config);
 
         void updateWheelState(float forward_vel_1, float rotate_angle_1, float forward_vel_2, float rotate_angle_2);
+
+        // start wheel angle
         float m_start_wheel_angle = 0.0f;
+
+        // steer wheel angle limit
+        float m_allow_angle_min[2] = {0.0f,0.0f};
+        float m_allow_angle_max[2] = {0.0f,0.0f};
+
+        //float forward_vel_1, float rotate_angle_1, float forward_vel_2, float rotate_angle_2
         common::ValueStamped<std::array<float,4>> m_wheel_state;
-        // check
+        // check path validation
+        // 1. distance to goal
+        // 2. rotate in path
+        // 3. closest distance to path
+        // 4. steer limit
         bool checkPath() override;
         bool prepare() override;
 
@@ -339,8 +488,16 @@ namespace control{
         float m_prefer_steer_angle = 0.0f;
         float get_prefer_steer_angle();
 
+        bool goToNode(float node_id_float) override;
+        bool goToNode(size_t node_id) override;
+        bool gotoNode(const transform::Transform2d &node) override;
+
+        bool followLocalPath() override;
+
         bool createLocalPath_v1();
-        bool createLocalPath_v2();
+//        bool createLocalPath_v2();
+
+
 
     };
 

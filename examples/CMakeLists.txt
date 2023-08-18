@@ -10,7 +10,7 @@ include(../cmake/set_ros.cmake)
 include(../cmake/super_build.cmake)
 
 #abseil-cpp-20220623.1.tar.gz
-build_external_project(absl lib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/abseil-cpp-20220623.1.tar.gz -DABSL_BUILD_TESTING=OFF -DABSL_USE_GOOGLETEST_HEAD=ON -DCMAKE_CXX_STANDARD=14  -DABSL_ENABLE_INSTALL=ON)
+build_external_project(absl lib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/abseil-cpp-20230125.3.tar.gz -DABSL_BUILD_TESTING=OFF -DABSL_USE_GOOGLETEST_HEAD=ON -DCMAKE_CXX_STANDARD=14  -DABSL_ENABLE_INSTALL=ON -DBUILD_SHARED_LIBS=OFF)
 find_package(absl REQUIRED)
 
 build_external_project(mosquitto lib ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mosquitto-2.0.15.tar.gz -DCMAKE_BUILD_TYPE=Release  -DDOCUMENTATION=OFF) #-DcJSON_DIR=${cJSON_DIR}
@@ -79,9 +79,15 @@ find_package(Eigen3 REQUIRED )
 message(new eigen: EIGEN3_INCLUDE_DIRS : ${EIGEN3_INCLUDE_DIRS} )
 #https://stackoverflow.com/questions/43330165/how-to-link-a-shared-library-with-cmake-with-relative-path/69707790#69707790
 
-add_library(controller SHARED  src/control/MobileRobotController.cpp src/control/MotionPlanner.cpp)
+add_library(controller STATIC  src/control/MobileRobotController.cpp src/control/MotionPlanner.cpp)
 set_property(TARGET controller PROPERTY CXX_STANDARD 14)
-target_link_libraries(controller PUBLIC  absl::strings  absl::str_format ${mosquitto_LIBRARY} ros_message_manager mqtt_message_manager ${CERES_LIBRARIES})
+target_link_libraries(controller PUBLIC
+#		absl::strings  absl::str_format
+		absl::strings absl::strings_internal absl::str_format absl::str_format_internal
+
+		absl::log absl::log_internal_check_impl absl::log_internal_check_op absl::statusor
+
+		${mosquitto_LIBRARY} ros_message_manager mqtt_message_manager ${CERES_LIBRARIES})
 target_include_directories(controller PUBLIC include src  ${EIGEN3_INCLUDE_DIRS}   )
 set_target_properties(controller PROPERTIES
 		BUILD_WITH_INSTALL_RPATH FALSE

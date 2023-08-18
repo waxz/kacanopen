@@ -378,6 +378,17 @@ constexpr auto PlannerConfig_properties = std::make_tuple(
         common::property(&control::PlannerConfig::pursuit_path_interpolate_step, "pursuit_path_interpolate_step"),
         common::property(&control::PlannerConfig::pursuit_path_angle_converge, "pursuit_path_angle_converge"),
 
+        //pursuit_path_width
+        common::property(&control::PlannerConfig::pursuit_path_width, "pursuit_path_width"),
+
+        common::property(&control::PlannerConfig::off_path_dist, "off_path_dist"),
+        common::property(&control::PlannerConfig::steer_rotate_vel, "steer_rotate_vel"),
+
+
+        common::property(&control::PlannerConfig::curve_interpolate_dist, "curve_interpolate_dist"),
+        common::property(&control::PlannerConfig::follow_dist_min, "follow_dist_min"),
+        common::property(&control::PlannerConfig::follow_dist_max, "follow_dist_max"),
+
 
         common::property(&control::PlannerConfig::pursuit_path_angle_pid_p, "pursuit_path_angle_pid_p"),
 
@@ -387,6 +398,14 @@ constexpr auto PlannerConfig_properties = std::make_tuple(
 
         //pursuit_path_angle_rot_vel_max
         common::property(&control::PlannerConfig::pursuit_path_angle_rot_vel_max, "pursuit_path_angle_rot_vel_max"),
+
+        //pursuit_goal_angle_rot_vel_max
+        common::property(&control::PlannerConfig::pursuit_goal_angle_rot_vel_max, "pursuit_goal_angle_rot_vel_max"),
+
+        //speed_up_acc
+        common::property(&control::PlannerConfig::speed_up_acc, "speed_up_acc"),
+//        speed_down_acc
+        common::property(&control::PlannerConfig::speed_down_acc, "speed_down_acc"),
 
         common::property(&control::PlannerConfig::pursuit_goal_forward_vel, "pursuit_goal_forward_vel"),
         common::property(&control::PlannerConfig::pursuit_goal_angle_pid_p, "pursuit_goal_angle_pid_p"),
@@ -567,7 +586,6 @@ int test_tec(int argc, char** argv) {
 
     plog::RollingFileAppender<plog::CsvFormatter> fileAppender("tec.csv", 20000000, 20); // Create the 1st appender.
     plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender; // Create the 2nd appender.
-    plog::init(plog::debug, &fileAppender).addAppender(&consoleAppender); // Initialize the logger with the both appenders.
 
 
 
@@ -606,11 +624,19 @@ int test_tec(int argc, char** argv) {
 
     bool use_dynamic_vel = false;
 
+    bool log_to_file = false;
+
+    int log_level = int(plog::Severity::error);
+
+
     auto cli
             =  lyra::exe_name(exe_name)
                | lyra::help(get_help)
                | lyra::opt( config_file, "config_file" )["-c"]["--config_file"]("config_file")
                | lyra::opt( enable_control)["-e"]["--enable_control"]("enable_control")
+               | lyra::opt( log_to_file)["-l"]["--log_to_file"]("log_to_file")
+               | lyra::opt( log_level,"log_level")["-L"]["--log_level"]("log_level")
+
                | lyra::opt( use_sim)["-S"]["--use_sim"]("use_sim")
                | lyra::opt( use_dynamic_vel)["-d"]["--use_dynamic_vel"]("use_dynamic_vel")
                | lyra::opt(smooth_stop,"smooth_stop")["-s"]["--smooth_stop"]("smooth_stop")
@@ -647,6 +673,15 @@ int test_tec(int argc, char** argv) {
         std::cerr << "Error in command line: " << result.message() << std::endl;
         return 0;
     }
+
+    if(log_to_file){
+        plog::init(plog::Severity(log_level), & consoleAppender).addAppender(&fileAppender); // Initialize the logger with the both appenders.
+
+    }else{
+        plog::init(plog::Severity(log_level), & consoleAppender);//.addAppender(&fileAppender); // Initialize the logger with the both appenders.
+    }
+
+
 
     if(config_file.empty()){
         std::cout << "config_file not set" << std::endl;
@@ -1028,18 +1063,29 @@ int test_tec(int argc, char** argv) {
     // stop/cancel : path size = 0
     // velocity constrains: ros param or embed in frame_id string
     // ros
-    auto planner_path_sub_cb = [&motion_planner](void* data){
+    auto planner_path_sub_cb = [&recv_cmd_vel_msg, &motion_planner](void* data){
         common_message::Path * data_ptr = static_cast<common_message::Path*>(data);
 
         motion_planner.requestPath(*data_ptr);
+
+        { recv_cmd_vel_msg.linear.x = 0.0;
+            recv_cmd_vel_msg.linear.y = 0.0;
+            recv_cmd_vel_msg.angular.z = 0.0;
+        }
+
     };
 
 
     // goal callbak
-    auto planner_goal_sub_cb = [&motion_planner](void* data){
+    auto planner_goal_sub_cb = [&recv_cmd_vel_msg, &motion_planner](void* data){
         common_message::PoseStamped * data_ptr = static_cast<common_message::PoseStamped*>(data);
         motion_planner.requestGoal(*data_ptr);
 
+        {
+            recv_cmd_vel_msg.linear.x = 0.0;
+            recv_cmd_vel_msg.linear.y = 0.0;
+            recv_cmd_vel_msg.angular.z = 0.0;
+        }
     };
     auto planner_config_sub_cb = [&motion_planner](void* data){
         common_message::HeaderString * data_ptr = static_cast<common_message::HeaderString*>(data);
@@ -1606,9 +1652,9 @@ int test_tec(int argc, char** argv) {
         else if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::finished){
             planner_status.data.assign("finished") ;
         }else if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::error_path){
-            planner_status.data.assign("error_path") ;
+            planner_status.data.assign(motion_planner.getStatusMsg()) ;
         }else if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::off_path){
-            planner_status.data.assign("off_path") ;
+            planner_status.data.assign(motion_planner.getStatusMsg()) ;
         }else{
             planner_status.data.assign("running") ;
         }
@@ -1728,7 +1774,7 @@ int test_tec(int argc, char** argv) {
 
 
             return false;
-        },50*1000,1);
+        },2*1000*1000,1);
 
 
 
@@ -1763,7 +1809,7 @@ int test_tec(int argc, char** argv) {
             rosMessageManager.send_tf(send_odom_base_tf);
 
             return true;
-        },10*1000,0);
+        },20*1000,0);
 
     }
 
@@ -1916,7 +1962,6 @@ int test_tec(int argc, char** argv) {
                     }
 
                     {
-                        controller.setPrefer(true);
 
                         if(std::abs(recv_cmd_vel_msg.linear.y) < std::abs(recv_cmd_vel_msg.linear.x)) {
                             controller.setSteerPreference(0.0f);
@@ -1963,10 +2008,12 @@ int test_tec(int argc, char** argv) {
                     motion_planner.updateWheelState(SteerConfigArray[0].actual_forward_vel,SteerConfigArray[0].actual_rot_abs_angle, SteerConfigArray[1].actual_forward_vel,SteerConfigArray[1].actual_rot_abs_angle);
 
                     common::Time t1 = common::FromUnixNow();
-                    auto& command = motion_planner.go();
+                    motion_planner.go();
+                    auto& command = motion_planner.getCommand();
+
                     PLOGD << "go_time: " << common::ToMillSeconds(common::FromUnixNow() - t1) << " ms";
 
-                    {
+                    if(0){
 
                         if(!motion_planner.m_local_path.value.empty()){
                             size_t pose_num = motion_planner.m_local_path.value.size();
@@ -1986,20 +2033,22 @@ int test_tec(int argc, char** argv) {
                         recv_cmd_vel_msg.linear.y = command.command[1];
                         recv_cmd_vel_msg.angular.z = command.command[2];
                         controller.setSmoothStop();
+//todo: remove
+#if 0
                         controller.setPrefer(motion_planner.use_prefer_steer_angle());
 
                         controller.setSteerPreference(motion_planner.get_prefer_steer_angle());
+#endif
+                    }else if(command.command_type == control::MotionPlanner::CommandType::steer && command.command.size() == 1 ){
 
-                    }else if(command.command_type == control::MotionPlanner::CommandType::raw && command.command.size() == 4 ){
 
 
+                        controller.m_steer_wheel[0].getCommandForwardVel() =  0.0f;
+                        controller.m_steer_wheel[0].getCommandRotateAngle() =  std::max(std::min(1.918888889f,  command.command[0]),-1.918888889f);
+                        controller.m_steer_wheel[1].getCommandForwardVel() =  0.0f;
+                        controller.m_steer_wheel[1].getCommandRotateAngle() =  std::max(std::min(1.918888889f,  command.command[0]),-1.918888889f);
 
-                        controller.m_steer_wheel[0].getCommandForwardVel() =  command.command[0];
-                        controller.m_steer_wheel[0].getCommandRotateAngle() =  std::max(std::min(1.918888889f,  command.command[1]),-1.918888889f);
-                        controller.m_steer_wheel[1].getCommandForwardVel() =  command.command[2];
-                        controller.m_steer_wheel[1].getCommandRotateAngle() =  std::max(std::min(1.918888889f,  command.command[3]),-1.918888889f);
-
-                        PLOGD << "raw command: " << command.command[0] << ", " << command.command[1] << ", " << command.command[2] << ", " << command.command[3];
+                        PLOGD << "steer command: " << command.command[0];
 
                         control_wheel(true, controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle() ,controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle() );
                         recv_cmd_vel_msg.linear.x = 0.0;
