@@ -160,6 +160,7 @@ struct ControllerConfig{
 
     common::Time forward_time;
     common::Time rotate_time;
+    bool feedback_timeout = false;
 
     
     
@@ -955,6 +956,7 @@ int test_tec(int argc, char** argv) {
     rosMessageManager.add_channel<common_message::Path>("PPUB:local_path:10");
     rosMessageManager.add_channel<common_message::Odometry>("PPUB:stable_pose:200");
     rosMessageManager.add_channel<common_message::HeaderString>("PPUB:status:200");
+    rosMessageManager.add_channel<std::vector<uint16_t >>("PPUB:error_code:200");
 
 
 
@@ -999,6 +1001,39 @@ int test_tec(int argc, char** argv) {
     planner_stable_pose.header.frame_id.assign("map");
 
     common_message::HeaderString planner_status;
+
+
+    bool driver_timeout = false;
+    bool driver_init_command = false;
+    std::vector<uint16_t > driver_error_code(4,0);
+
+    std::vector<uint16_t > driver_error_code_template(19);
+    driver_error_code_template[0] = 0x0001;
+    driver_error_code_template[1] = 0x0002;
+    driver_error_code_template[2] = 0x0004;
+    driver_error_code_template[3] = 0x0008;
+
+    driver_error_code_template[4] = 0x0010;
+    driver_error_code_template[5] = 0x0020;
+    driver_error_code_template[6] = 0x0040;
+    driver_error_code_template[7] = 0x0080;
+
+    driver_error_code_template[8] = 0x0100;
+    driver_error_code_template[9] = 0x0200;
+    driver_error_code_template[10] = 0x0400;
+    driver_error_code_template[11] = 0x0800;
+
+
+    driver_error_code_template[12] = 0x1000;
+    driver_error_code_template[13] = 0x2000;
+    driver_error_code_template[14] = 0x4000;
+    driver_error_code_template[15] = 0x8001;
+
+    driver_error_code_template[16] = 0x8002;
+    driver_error_code_template[17] = 0x8004;
+    driver_error_code_template[18] = 0x8005;
+
+
 
 
     if(!path_config.empty()){
@@ -1077,18 +1112,28 @@ int test_tec(int argc, char** argv) {
 
 
     // goal callbak
-    auto planner_goal_sub_cb = [&recv_cmd_vel_msg, &motion_planner](void* data){
+    auto planner_goal_sub_cb = [&driver_init_command, &recv_cmd_vel_msg, &motion_planner](void* data){
         common_message::PoseStamped * data_ptr = static_cast<common_message::PoseStamped*>(data);
-        motion_planner.requestGoal(*data_ptr);
+        PLOGF << "receive goal";
 
         {
             recv_cmd_vel_msg.linear.x = 0.0;
             recv_cmd_vel_msg.linear.y = 0.0;
             recv_cmd_vel_msg.angular.z = 0.0;
         }
+
+        if(data_ptr->header.frame_id == "reset"){
+            driver_init_command = true;
+            return ;
+        }
+        motion_planner.requestGoal(*data_ptr);
+
+
     };
     auto planner_config_sub_cb = [&motion_planner](void* data){
         common_message::HeaderString * data_ptr = static_cast<common_message::HeaderString*>(data);
+        PLOGF << "receive path";
+
         control::PlannerConfig config = motion_planner.m_planner_config;
         if(!data_ptr->data.empty() && (motion_planner.m_task_state == control::MotionPlanner::TaskState::idle || motion_planner.m_task_state == control::MotionPlanner::TaskState::finished) ){
             nlohmann::json j = nlohmann::json::parse(data_ptr->data);
@@ -1242,7 +1287,7 @@ int test_tec(int argc, char** argv) {
     bool is_rot_sensor_ready = false;
 
     bool is_all_operational = false;
-    bool is_any_fault = false;
+    bool is_any_fault_exist = false;
 
     auto node_heartbeat_cb = [&](const kaco::Message& message, const kaco::NMT::NodeState & state){
 
@@ -1265,10 +1310,7 @@ int test_tec(int argc, char** argv) {
         for(auto i : driver_id_vec){
             is_all_alive = is_all_alive &&  (device_node_state_array[i] == kaco::NMT::NodeState::Pre_operational || device_node_state_array[i] == kaco::NMT::NodeState::Operational );
         }
-        is_any_fault = false;
-        for(auto i : driver_id_vec)   {
-            is_any_fault = is_any_fault || (device_node_emcy_array[i] != 0 );
-        }
+
     };
     device.nmt.register_device_alive_callback(node_heartbeat_cb);
 
@@ -1290,39 +1332,39 @@ int test_tec(int argc, char** argv) {
 
         PLOGD <<"control_wheel :[enable]: " <<enable;
 
-        forward_vel_1 *= enable;
-        rotate_angle_1 *= enable;
-        forward_vel_2 *= enable;
-        rotate_angle_2 *= enable;
-        PLOGD <<"control_wheel 1:[forward_vel, rotate_angle]: " << forward_vel_1 << ", " << rotate_angle_1;
-        PLOGD <<"control_wheel 2:[forward_vel, rotate_angle]: " << forward_vel_2 << ", " << rotate_angle_2;
 
-        PLOGD <<"SteerConfigArray[0].use_rot_angle_abs: " << SteerConfigArray[0].use_rot_angle_abs;
-        PLOGD <<"SteerConfigArray[1].use_rot_angle_abs: " << SteerConfigArray[1].use_rot_angle_abs;
+        if(enable){
+//            forward_vel_1 *= enable;
+//            rotate_angle_1 *= enable;
+//            forward_vel_2 *= enable;
+//            rotate_angle_2 *= enable;
+            PLOGD <<"control_wheel 1:[forward_vel, rotate_angle]: " << forward_vel_1 << ", " << rotate_angle_1;
+            PLOGD <<"control_wheel 2:[forward_vel, rotate_angle]: " << forward_vel_2 << ", " << rotate_angle_2;
 
-        PLOGD <<"SteerConfigArray[0].rot_angle_abs_offset: " << SteerConfigArray[0].rot_angle_abs_offset;
-        PLOGD <<"SteerConfigArray[1].rot_angle_abs_offset: " << SteerConfigArray[1].rot_angle_abs_offset;
+            PLOGD <<"SteerConfigArray[0].use_rot_angle_abs: " << SteerConfigArray[0].use_rot_angle_abs;
+            PLOGD <<"SteerConfigArray[1].use_rot_angle_abs: " << SteerConfigArray[1].use_rot_angle_abs;
 
-
-        *(int*)(&driver_command_msg_channel_1[0].data[0]) = forward_vel_1 / SteerConfigArray[0].forward_speed_k;
-        *(int*)(&driver_command_msg_channel_1[1].data[0]) = (rotate_angle_1 - SteerConfigArray[0].rot_angle_b - SteerConfigArray[0].rot_angle_abs_offset)/SteerConfigArray[0].rot_angle_k;
-        *(int*)(&driver_command_msg_channel_2[0].data[0]) = forward_vel_2 / SteerConfigArray[1].forward_speed_k;
-        *(int*)(&driver_command_msg_channel_2[1].data[0]) = (rotate_angle_2 - SteerConfigArray[1].rot_angle_b - SteerConfigArray[1].rot_angle_abs_offset)/SteerConfigArray[1].rot_angle_k;
-        PLOGD << "send can data to channel 1";
-        driver_command_msg_channel_1[0].print();
-        driver_command_msg_channel_1[1].print();
+            PLOGD <<"SteerConfigArray[0].rot_angle_abs_offset: " << SteerConfigArray[0].rot_angle_abs_offset;
+            PLOGD <<"SteerConfigArray[1].rot_angle_abs_offset: " << SteerConfigArray[1].rot_angle_abs_offset;
 
 
-        PLOGD << "send can data to channel 2";
-        driver_command_msg_channel_2[0].print();
-        driver_command_msg_channel_2[1].print();
+            *(int*)(&driver_command_msg_channel_1[0].data[0]) = forward_vel_1 / SteerConfigArray[0].forward_speed_k;
+            *(int*)(&driver_command_msg_channel_1[1].data[0]) = (rotate_angle_1 - SteerConfigArray[0].rot_angle_b - SteerConfigArray[0].rot_angle_abs_offset)/SteerConfigArray[0].rot_angle_k;
+            *(int*)(&driver_command_msg_channel_2[0].data[0]) = forward_vel_2 / SteerConfigArray[1].forward_speed_k;
+            *(int*)(&driver_command_msg_channel_2[1].data[0]) = (rotate_angle_2 - SteerConfigArray[1].rot_angle_b - SteerConfigArray[1].rot_angle_abs_offset)/SteerConfigArray[1].rot_angle_k;
+            PLOGD << "send can data to channel 1";
+            driver_command_msg_channel_1[0].print();
+            driver_command_msg_channel_1[1].print();
 
-        device.send(driver_command_msg_channel_1.data(),driver_command_msg_channel_1.size(),0);
-        device.send(driver_command_msg_channel_2.data(),driver_command_msg_channel_2.size(),1);
 
+            PLOGD << "send can data to channel 2";
+            driver_command_msg_channel_2[0].print();
+            driver_command_msg_channel_2[1].print();
 
-        if(!enable) {
+            device.send(driver_command_msg_channel_1.data(),driver_command_msg_channel_1.size(),0);
+            device.send(driver_command_msg_channel_2.data(),driver_command_msg_channel_2.size(),1);
 
+        }else{
             disable_forward_driver(1);
             disable_rotate_driver(2);
 
@@ -1330,6 +1372,8 @@ int test_tec(int argc, char** argv) {
             disable_rotate_driver(5);
 
         }
+
+
 
     };
 
@@ -1345,6 +1389,23 @@ int test_tec(int argc, char** argv) {
         SteerConfigArray[driver_id].actual_forward_vel = num * SteerConfigArray[driver_id].forward_speed_k;
         state_update = true;
 
+        SteerConfigArray[driver_id].forward_time = common::FromUnixNow();
+
+        //error code
+        uint16_t current_code =  * (uint16_t *)(&message.data[4]);
+        auto& code =  driver_error_code[driver_id*2 + 0];
+
+        bool is_fault_last = (std::find(driver_error_code_template.begin(), driver_error_code_template.end(), code) != driver_error_code_template.end());
+
+        bool is_fault_new = (std::find(driver_error_code_template.begin(), driver_error_code_template.end(),current_code) != driver_error_code_template.end());
+
+        if(is_fault_new || !is_fault_last){
+            code = current_code;
+        }
+
+        is_any_fault_exist = is_any_fault_exist || is_fault_new || is_fault_last;
+
+
         PLOGD << "actual_forward_vel: " << SteerConfigArray[driver_id].actual_forward_vel;
     };
 
@@ -1358,6 +1419,22 @@ int test_tec(int argc, char** argv) {
 
         SteerConfigArray[driver_id].addAngle(rot_angle);
         state_update = true;
+        SteerConfigArray[driver_id].forward_time = common::FromUnixNow();
+
+        //error code
+        uint16_t current_code =  * (uint16_t *)(&message.data[4]);
+        auto& code =  driver_error_code[driver_id*2 + 1];
+
+        bool is_fault_last = (std::find(driver_error_code_template.begin(), driver_error_code_template.end(), code) != driver_error_code_template.end());
+
+        bool is_fault_new = (std::find(driver_error_code_template.begin(), driver_error_code_template.end(),current_code) != driver_error_code_template.end());
+
+        if(is_fault_new || !is_fault_last){
+            code = current_code;
+        }
+
+        is_any_fault_exist = is_any_fault_exist || is_fault_new || is_fault_last;
+
         PLOGD << "actual_rot_angle: " << rot_angle;
 
     };
@@ -1690,9 +1767,7 @@ int test_tec(int argc, char** argv) {
             device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_1);
             device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_2);
 
-            if(is_any_fault){
 
-            }
 
             return true;
         },1000*1000,0);
@@ -1711,10 +1786,23 @@ int test_tec(int argc, char** argv) {
 
             if(is_all_alive){
 
+                if(driver_init_command){
+                    driver_init_command = false;
+                    is_all_initialise_triggered = false;
+                    is_all_initialised = false;
+                }
+
 
                 if(!is_all_initialise_triggered){
 
+                    // run once
+
+                    // clear error code
+                    is_any_fault_exist = false;
+                    std::fill(driver_error_code.begin(), driver_error_code.end(),0);
+
                     is_all_initialise_triggered = true;
+                    is_all_initialised = false;
                     taskManager.addTask([&]{
 
 
@@ -1740,6 +1828,27 @@ int test_tec(int argc, char** argv) {
 
                 }
 
+                driver_timeout = false;
+                for(size_t i = 0 ; i < 2;i++){
+
+                    driver_error_code[i*2+0] = std::abs(common::ToMillSeconds(odom.header.stamp - SteerConfigArray[i].forward_time )) > 1000 ? 0x8005:driver_error_code[i*2+0]  ;
+                    driver_error_code[i*2+1] = std::abs(common::ToMillSeconds(odom.header.stamp - SteerConfigArray[i].rotate_time )) > 1000 ? 0x8005:driver_error_code[i*2+0]  ;
+                    driver_timeout = driver_timeout || (std::abs(common::ToMillSeconds(odom.header.stamp - SteerConfigArray[i].forward_time ))) || (std::abs(common::ToMillSeconds(odom.header.stamp - SteerConfigArray[i].rotate_time )) );
+                }
+
+
+
+
+
+                is_any_fault_exist = is_any_fault_exist || driver_timeout;
+                //todo: remove in next version of driver
+                is_any_fault_exist = false;
+                if(is_any_fault_exist){
+                    for(size_t i = 0 ; i < 2;i++){
+                        SteerConfigArray[i].actual_forward_vel = 0.0 ;
+                        SteerConfigArray[i].actual_rot_abs_angle = 0.0;
+                    }
+                }
 
             }else{
                 return true;
@@ -1780,20 +1889,24 @@ int test_tec(int argc, char** argv) {
 
         is_all_alive = true;
         is_all_initialised = true;
-        is_any_fault = false;
+        is_any_fault_exist = false;
         is_rot_sensor_ready = true;
         taskManager.addTask([&]{
             is_all_alive = true;
             is_all_initialised = true;
-            is_any_fault = false;
+            is_any_fault_exist = false;
             is_rot_sensor_ready = true;
 
             smoothSimulator.updateState(controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle(),
                                         controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle());
 
 
+            auto now = common::FromUnixNow();
+
             for(int i = 0; i < CONTROLLER_NUM;i++){
 
+                SteerConfigArray[i].forward_time = now;
+                SteerConfigArray[i].rotate_time = now;
                 SteerConfigArray[i].actual_forward_vel = smoothSimulator.m_steer_wheel[i].actual_forward_vel  ;
                 SteerConfigArray[i].actual_rot_abs_angle = smoothSimulator.m_steer_wheel[i].actual_rot_angle;
 
@@ -1872,6 +1985,8 @@ int test_tec(int argc, char** argv) {
 
 
             rosMessageManager.send_message("PUB:odom",&odom, 1, 0.1 );
+            rosMessageManager.send_message("PPUB:error_code",&driver_error_code, 1, 0.1 );
+            rosMessageManager.send_message("PUB:cmd_vel_planner",&send_cmd_vel,1,0.01);
 
 
             {
@@ -1933,8 +2048,10 @@ int test_tec(int argc, char** argv) {
         PLOGD << "add cmd_vel command";
         taskManager.addTask([&]{
 
+            //todo: remove
+            is_any_fault_exist = false;
 
-            if((is_all_alive && is_all_initialised && is_rot_sensor_ready && ! is_any_fault)){
+            if((is_all_alive && is_all_initialised && is_rot_sensor_ready && ! is_any_fault_exist)){
 
                 rosMessageManager.recv_message("SUB:control_cmd_vel",10,0.001, cmd_vel_sub_cb);
 
@@ -2067,9 +2184,7 @@ int test_tec(int argc, char** argv) {
 
 
 
-
                 send_cmd_vel = recv_cmd_vel_msg;
-                rosMessageManager.send_message("PUB:cmd_vel_planner",&send_cmd_vel,1,0.01);
 
 
 
@@ -2143,7 +2258,10 @@ int test_tec(int argc, char** argv) {
                 recv_cmd_vel_msg.linear.x = 0.0;
                 recv_cmd_vel_msg.linear.y = 0.0;
                 recv_cmd_vel_msg.angular.z = 0.0;
-
+                send_cmd_vel.linear.x = 0.0;
+                send_cmd_vel.linear.y = 0.0;
+                send_cmd_vel.angular.z = 0.0;
+                control_wheel(false, controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle() ,controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle() );
 
                 return true;
 
