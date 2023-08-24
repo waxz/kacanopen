@@ -158,15 +158,7 @@ namespace control{
 
         float step = 0.05;
         float goal_dist = std::sqrt( ( base_x - goal.pose.position.x )*(base_x - goal.pose.position.x) + (base_y - goal.pose.position.y)*(base_y - goal.pose.position.y));
-#if 0
-        if(goal_dist < m_planner_config.pursuit_goal_reach_tolerance){
-            m_task_state = TaskState::error_path;
 
-            global_path.clear();
-            m_local_path.value.clear();
-            return;
-        }
-#endif
 
 
         if(absl::StrContains(m_task_frame,"rotate")){
@@ -193,6 +185,14 @@ namespace control{
 
             return;
         }
+
+#if 1
+        if(goal_dist < m_planner_config.pursuit_goal_reach_tolerance){
+            m_task_state = TaskState::finished;
+            return;
+        }
+#endif
+
 
         size_t pose_num = goal_dist/step;
         pose_num = std::max(size_t(1) ,pose_num);
@@ -322,12 +322,9 @@ namespace control{
         auto& goal =  path.poses.back();
 
         float goal_dist = std::sqrt( ( base_x - goal.pose.position.x )*(base_x - goal.pose.position.x) + (base_y - goal.pose.position.y)*(base_y - goal.pose.position.y));
-#if 0
+#if 1
         if(goal_dist < m_planner_config.pursuit_goal_reach_tolerance){
-            m_task_state = TaskState::error_path;
-
-//            global_path.clear();
-            m_local_path.value.clear();
+            m_task_state = TaskState::finished;
             return;
         }
 #endif
@@ -425,7 +422,8 @@ namespace control{
         common::Time now = common::FromUnixNow();
         interpolate_time_step_1 = now;
 
-        update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time)*1e-6;
+        update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time_step_0)*1e-6;
+        update_s = std::min(update_s, 0.02f);
         interpolate_time_step_0 = now;
 
         std::cout << "m_rotate_init_angle_diff: " << m_rotate_init_angle_diff<< "\n";
@@ -438,7 +436,7 @@ namespace control{
                 command_angular_z = 0.0f;
                 return std::abs(actual_angular_z) < 0.001;
             }else{
-                command_angular_z = min_rotate_vel + update_s*rotate_acc;
+                command_angular_z = actual_angular_z + update_s*rotate_acc;
 //            command_angular_z =command_angular_z > 0.0 ?  std::min(command_angular_z, max_rotate_vel):std::max(command_angular_z, max_rotate_vel);
             }
 
@@ -450,7 +448,7 @@ namespace control{
                 return std::abs(actual_angular_z) < 0.001;
 
             }else{
-                command_angular_z = min_rotate_vel + update_s*rotate_acc;
+                command_angular_z = actual_angular_z + update_s*rotate_acc;
 //            command_angular_z =command_angular_z > 0.0 ?  std::min(command_angular_z, max_rotate_vel):std::max(command_angular_z, max_rotate_vel);
             }
 
@@ -761,13 +759,14 @@ namespace control{
         // check actual_pose to target_pose distance is beyond target tolerance
 
         float actual_to_target_dist = std::sqrt(transform::diff2(actual_pose,global_path.back()));
+#if 0
         if(actual_to_target_dist < m_planner_config.pursuit_goal_reach_tolerance){
             char buffer[100];
             sprintf(buffer,"path_error: goal is in tolerance, %.3f < %.3f", actual_to_target_dist,m_planner_config.pursuit_goal_reach_tolerance );
             m_status_msg.assign(buffer);
             return false;
         }
-
+#endif
 #if 0
         float path_start_yaw_map = 0.0;
         path_start_yaw_map = std::atan2(global_path[1].y() - global_path[0].y() ,global_path[1].x() - global_path[0].x()  );
@@ -1989,9 +1988,10 @@ namespace control{
         common::Time now = common::FromUnixNow();
         interpolate_time_step_1 = now;
 
-        float abs_update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time)*1e-6;
+//        float abs_update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time)*1e-6;
 
-        float relative_update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time_step_0)*1e-6;
+        float update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time_step_0)*1e-6;
+        update_s = std::min(update_s, 0.02f);
 
         interpolate_time_step_0 = now;
 
@@ -2031,10 +2031,10 @@ namespace control{
         float odom_twist_vel = std::sqrt(odom_twist.x()*odom_twist.x() + odom_twist.y()*odom_twist.y());
 
 
-        float odom_forward_dist = odom_twist_vel * relative_update_s;
+        float odom_forward_dist = odom_twist_vel * update_s;
         PLOGD << "odom_twist_vel: " << odom_twist_vel;
 
-        float wheel_max_angle_change = relative_update_s * m_max_base_forward_angle_vel;
+        float wheel_max_angle_change = update_s * m_max_base_forward_angle_vel;
         PLOGD << "wheel_max_angle_change: " << wheel_max_angle_change;
 
 
@@ -2264,7 +2264,7 @@ namespace control{
                 m_forward_vel = m_track_path_info[m_closest_path_node_id].forward_vel;
 
                 // smooth speed up
-                float increase_forward_vel =  odom_twist_vel +   relative_update_s * m_planner_config.speed_up_acc;
+                float increase_forward_vel =  odom_twist_vel +   update_s * m_planner_config.speed_up_acc;
 
                 m_forward_vel = std::min(m_forward_vel,increase_forward_vel );
             }

@@ -575,7 +575,17 @@ void from_json(const nlohmann::json& j, PathConfig& object) {
         }
     });
 }
-
+namespace common{
+    struct Variable{
+        bool value = false;
+        Variable(bool v): value(v){
+        }
+        explicit operator bool() {
+            bool v = value;
+            return value = false, v;
+        }
+    };
+}
 
 
 int test_tec(int argc, char** argv) {
@@ -1004,7 +1014,7 @@ int test_tec(int argc, char** argv) {
 
 
     bool driver_timeout = false;
-    bool driver_init_command = false;
+    common::Variable driver_init_command = false;
     std::vector<uint16_t > driver_error_code(4,0);
 
     std::vector<uint16_t > driver_error_code_template(19);
@@ -1114,8 +1124,6 @@ int test_tec(int argc, char** argv) {
     // goal callbak
     auto planner_goal_sub_cb = [&driver_init_command, &recv_cmd_vel_msg, &motion_planner](void* data){
         common_message::PoseStamped * data_ptr = static_cast<common_message::PoseStamped*>(data);
-        PLOGF << "receive goal";
-
         {
             recv_cmd_vel_msg.linear.x = 0.0;
             recv_cmd_vel_msg.linear.y = 0.0;
@@ -1132,8 +1140,6 @@ int test_tec(int argc, char** argv) {
     };
     auto planner_config_sub_cb = [&motion_planner](void* data){
         common_message::HeaderString * data_ptr = static_cast<common_message::HeaderString*>(data);
-        PLOGF << "receive path";
-
         control::PlannerConfig config = motion_planner.m_planner_config;
         if(!data_ptr->data.empty() && (motion_planner.m_task_state == control::MotionPlanner::TaskState::idle || motion_planner.m_task_state == control::MotionPlanner::TaskState::finished) ){
             nlohmann::json j = nlohmann::json::parse(data_ptr->data);
@@ -1372,8 +1378,6 @@ int test_tec(int argc, char** argv) {
             disable_rotate_driver(5);
 
         }
-
-
 
     };
 
@@ -1787,7 +1791,6 @@ int test_tec(int argc, char** argv) {
             if(is_all_alive){
 
                 if(driver_init_command){
-                    driver_init_command = false;
                     is_all_initialise_triggered = false;
                     is_all_initialised = false;
                 }
@@ -1814,6 +1817,8 @@ int test_tec(int argc, char** argv) {
                             initialise_rotate_driver(5);
 
                             taskManager.addTask([&]{
+                                is_any_fault_exist = false;
+                                std::fill(driver_error_code.begin(), driver_error_code.end(),0);
                                 is_all_initialised = true;
                                 return false;
                             }, initialise_wait_s*1000*1000, 0);
@@ -1891,11 +1896,10 @@ int test_tec(int argc, char** argv) {
         is_all_initialised = true;
         is_any_fault_exist = false;
         is_rot_sensor_ready = true;
+
+
         taskManager.addTask([&]{
-            is_all_alive = true;
-            is_all_initialised = true;
-            is_any_fault_exist = false;
-            is_rot_sensor_ready = true;
+
 
             smoothSimulator.updateState(controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle(),
                                         controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle());
