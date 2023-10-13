@@ -22,29 +22,48 @@ namespace control {
         // time
         common::Time time;
 
+        float action_timeout_s = 0.2;
+        float comm_timeout_s = 0.2;
+
+        common::TimedCounter forward_action_timeout_timer;
+        common::TimedCounter rotate_action_timeout_timer;
+
+        // predict next action
+        float predict_control_s = 0.02f;
+
+        float forward_reach_thresh = 0.01f;
+        float rotate_reach_thresh = 0.01f;
+
+
         bool is_forward_running = false;
+
+        bool forward_reached = false;
+        bool rotate_reached = false;
+
+        bool forward_comm_timeout = false;
+        bool rotate_comm_timeout = false;
 
         // steering wheel or fix wheel
         bool enable_rot = false;
 
         // mount position, and rot angle
-        float mount_position_x = 0.0;
-        float mount_position_y = 0.0;
+        float mount_x = 0.0;
+        float mount_y = 0.0;
 
         void config();
 
+        void check(bool reset = false);
 
-//        transform::Transform2d position;
 
         // rot range
-        float max_rot_angle = 1.1 * M_PI_2;
+        float max_rotate_angle = 1.1 * M_PI_2;
 
         // acc/vel limit
-        float max_forward_acc = 0.8;  // vel change limit , unit m/s2
-        float max_forward_vel = 1.2;  // vel limit, unit m/s
+        float max_forward_acc = 0.8f;  // vel change limit , unit m/s2
+        float max_forward_vel = 1.2f;  // vel limit, unit m/s
         float min_forward_vel = 0.05;
         float max_rot_acc = 2*M_PIf32;      // vel change limit, unit rag/s2
-        float max_rot_vel = 0.5*M_PIf32;      // vel limit , unit rag/s // 3000rpm ==> 1 rotate per second
+        float max_rotate_vel = 0.5 * M_PIf32;      // vel limit , unit rag/s // 3000rpm ==> 1 rotate per second
 
 
 
@@ -105,6 +124,14 @@ namespace control {
 
 
 
+    struct MobileRobotControllerBaseConfig{
+        float action_timeout_s = 0.1f;
+        float comm_timeout_s = 0.1f;
+        float vel_action_reach_thresh = 0.001f;
+        float angle_action_reach_thresh = 0.01f;
+
+    };
+
     class MobileRobotControllerBase {
 
 
@@ -115,8 +142,10 @@ namespace control {
         enum class StateCode{
             Uninitialised = 0,
             OK = 1,
-            FeedBackError
+            ForwardTimeoutError = 2
         };
+
+
 
         enum class MoveType{
             Uninitialised = 0,
@@ -240,8 +269,12 @@ namespace control {
         float constrain_angle = 0.0;
         float m_prefer_steer_angle = 0.0f;
         bool m_use_prefer_angle = false;
+        float m_forward_vel_drift_max = 0.01f;
+
+        float m_forward_vel_act_timeout_s = 0.1f;
 
     public:
+        void bypass();
 
         void setPrefer(bool prefer);
         void setSteerPreference(float angle);

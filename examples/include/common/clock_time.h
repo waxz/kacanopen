@@ -278,5 +278,32 @@ namespace common {
           << ":" << std::setw(6) << std::setfill('0') << u_s.count()<<" us";
         out.assign(s.str());
     }
+
+    struct TimedCounter{
+        Time t;
+        long interval_ms= 100;
+        TimedCounter():t(FromUnixNow()),interval_ms(100){
+
+        }
+        TimedCounter(float interval_s):t(FromUnixNow()),interval_ms(interval_s * 1000){
+        }
+
+        void set(float interval_s){
+            interval_ms = 1000*interval_s;
+            t = FromUnixNow();
+        }
+
+
+        /// start counter is s is on
+        /// \param s
+        void on(bool s){
+            if(!s){
+                t = FromUnixNow();
+            }
+        }
+        bool eval() const{
+            return ToMillSeconds(FromUnixNow() - t) > interval_ms;
+        }
+    };
 } // namespace common
 #endif //COMMON_CLOCK_TIME_H

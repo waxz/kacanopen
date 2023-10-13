@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 2.8)
 
 # Use g++-4.9 if there is also an older g++ version on the system
 if("${CMAKE_CXX_COMPILER}" STREQUAL "" OR "${CMAKE_CXX_COMPILER}" STREQUAL "gcc" OR "${CMAKE_CXX_COMPILER}" STREQUAL "g++")
-	find_program(NEWER_GNU_CXX_COMPILER g++-4.9)
+	find_program(NEWER_GNU_CXX_COMPILER g++-9)
 	if (NOT "${NEWER_GNU_CXX_COMPILER}" STREQUAL "")
 		set(CMAKE_CXX_COMPILER ${NEWER_GNU_CXX_COMPILER})
 		message("Using ${CMAKE_CXX_COMPILER} as compiler.")
@@ -44,10 +44,18 @@ endif()
 #       using set_property(TARGET ${TARGET_NAME} PROPERTY CXX_STANDARD 14) again.
 project(kacanopen C CXX)
 
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -Wall -Wextra") # -Werror
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra") # -Werror
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra") # -Werror
 
 ### settings ###
+
+include(cmake/common.cmake)
+include(cmake/set_rpath.cmake)
+
+# ---------------------------------------------------------------------------------------------------------
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF) # use -std=c++... instead of -std=gnu++...
+set(CMAKE_CXX_STANDARD  14)
 
 include(CMakeSettings.txt)
 
@@ -111,11 +119,11 @@ message(STATUS "Pause between two consecutively sent CAN frames is set to ${CONS
 ### dependencies ###
 
 find_package(Threads)
-find_package(Boost 1.46.1 COMPONENTS system filesystem REQUIRED) 
+#find_package(Boost 1.46.1 COMPONENTS system filesystem REQUIRED)
 
 # Boost required for property_tree / ini_parser
 if(NOT(Boost_FOUND))
-	message(FATAL_ERROR "Boost > 1.46.1 not found. Boost is required for ini_parser class. This is a header-only library. You can simply download the latest boost package from http://www.boost.org/, extract it into any directory and include it using the following catkin/CMake argument: -DBOOST_ROOT=\"/path/to/boost/\"")
+#	message(FATAL_ERROR "Boost > 1.46.1 not found. Boost is required for ini_parser class. This is a header-only library. You can simply download the latest boost package from http://www.boost.org/, extract it into any directory and include it using the following catkin/CMake argument: -DBOOST_ROOT=\"/path/to/boost/\"")
 endif()
 
 message(STATUS "Found Boost headers in ${Boost_INCLUDE_DIRS}")
@@ -194,10 +202,12 @@ add_definitions("-DSHARE_SOURCE_PATH=\"${CMAKE_CURRENT_LIST_DIR}/master/share\""
 add_definitions("-DSHARE_INSTALLED_PATH=\"${CMAKE_INSTALL_PREFIX}/share/kacanopen\"")
 message(STATUS "SHARE_SOURCE_PATH set to ${CMAKE_CURRENT_LIST_DIR}/share.")
 message(STATUS "SHARE_INSTALLED_PATH set to ${CMAKE_INSTALL_PREFIX}/share/kacanopen.")
-install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/master/share/
-	DESTINATION share/kacanopen
-)
-
+#install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/master/share/
+#	DESTINATION share/kacanopen
+#)
+install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/data/
+		DESTINATION share/kacanopen
+		)
 ### Source code ###
 
 if (NOT(${NO_ROS}))
@@ -207,7 +217,7 @@ endif()
 add_subdirectory(drivers_lgpl)
 add_subdirectory(drivers)
 add_subdirectory(core)
-add_subdirectory(master)
+#add_subdirectory(master)
 add_subdirectory(examples)
 
 

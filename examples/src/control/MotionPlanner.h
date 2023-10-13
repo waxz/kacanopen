@@ -57,7 +57,9 @@ namespace control{
 
         float pursuit_path_angle_converge = 0.1;
 
-        float pursuit_path_angle_pid_p = 0.6;
+        float pursuit_path_rotate_vel_angle_p = 0.6;
+        float pursuit_path_rotate_vel_vel_p = 0.01;
+
         float pursuit_path_angle_rot_vel_max = 0.01;
 
         float pursuit_path_forward_vel = 0.6;
@@ -65,10 +67,13 @@ namespace control{
 //        float follow_line_vel = 0.6;
 
         // virtual path width, single side
-        float pursuit_path_width = 0.1;
+        float pursuit_path_width = 0.1f;
+
+        float pursuit_path_width_direction_adjust = 0.05f;
 
         // off path distance, single side
-        float off_path_dist = 0.2;
+        float off_path_dist = 0.2f;
+
 
         // steer rotate vel
         float steer_rotate_vel = 0.5;
@@ -320,6 +325,7 @@ namespace control{
         float m_forward_angle = 0.0f;
         float m_rotate_vel = 0.0f;
         float m_rotate_diff = 0.0f;
+        bool off_width_once = false;
 
 
         virtual bool checkPath() = 0;

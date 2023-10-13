@@ -8,19 +8,41 @@
 #define DEFINE_ASSERT_LEVEL 1
 
 #include "dynamic_assert/assertion.h"
-#include "common/string_logger.h"
+//#include "common/string_logger.h"
 #include "math/geometry.h"
-#include "PathGenerator.h"
+//#include "PathGenerator.h"
 
 #include <plog/Log.h> // Step1: include the headers
 
-#include "math/math_basic.h"
+//#include "math/math_basic.h"
 #include "common/random.h"
 
 namespace control {
 
     void SteerWheelBase::config() {
+        forward_action_timeout_timer.set(action_timeout_s);
+        rotate_action_timeout_timer.set(action_timeout_s);
     }
+
+    void SteerWheelBase::check(bool reset) {
+
+        forward_reached = std::abs(actual_forward_vel - getCommandForwardVel()) < forward_reach_thresh;
+        rotate_reached = std::abs(actual_rot_angle - getCommandRotateAngle()) < rotate_reach_thresh;
+
+
+
+        forward_action_timeout_timer.on(!forward_reached && !reset);
+        rotate_action_timeout_timer.on(!rotate_reached && !reset);
+#if 0
+        PLOGF.printf("thresh: [%.3f, %.3f], forward: [%.3f, %.3f], rotate:[%.3f, %.3f], forward_reached: %i, rotate_reached: %i, forward_action_timeout: %i, rotate_action_timeout: %i",
+                     forward_reach_thresh, rotate_reach_thresh,
+                     actual_forward_vel , getCommandForwardVel(),
+                     actual_rot_angle , getCommandRotateAngle(),
+                     forward_reached, rotate_reached, forward_action_timeout_timer.eval(), rotate_action_timeout_timer.eval() );
+#endif
+    }
+
+
 
     void SteerWheelBase::setPrefer(bool prefer) {
         use_prefer = prefer;
@@ -55,7 +77,7 @@ namespace control {
         // choose possible rotate angle
         PLOGD << "target_angle_in_motor: " << target_angle_in_motor ;
 
-        if( std::abs(target_angle_in_motor) < max_rot_angle){
+        if(std::abs(target_angle_in_motor) < max_rotate_angle){
 
             // two possible rot angle in motor frame
             float angle_1 = target_angle_in_motor > 0.0 ? target_angle_in_motor - M_PIf32: target_angle_in_motor;
@@ -63,11 +85,11 @@ namespace control {
             angle_1 = angle_normalise_zero(angle_1);
             angle_2 = angle_normalise_zero(angle_2);
 
-            if(  std::abs(angle_1) > max_rot_angle ){
+            if(std::abs(angle_1) > max_rotate_angle ){
                 angle_1 = target_angle_in_motor;
             }
 
-            if(  std::abs(angle_2) > max_rot_angle ){
+            if(std::abs(angle_2) > max_rotate_angle ){
                 angle_2 = target_angle_in_motor;
             }
 
@@ -121,14 +143,14 @@ namespace control {
 
 
 //            PLOGF << "command_rotate_angle: " << command_rotate_angle ;
-        }else if(target_angle_in_motor < -max_rot_angle ){
+        }else if(target_angle_in_motor < -max_rotate_angle ){
 
 
             command_rotate_angle =  target_angle_in_motor + M_PIf32;
             command_forward_vel = -command_forward_vel;
             PLOGD << "command_rotate_angle: " << command_rotate_angle ;
 
-        }else  if(target_angle_in_motor > max_rot_angle ){
+        }else  if(target_angle_in_motor > max_rotate_angle ){
 
             command_rotate_angle  = target_angle_in_motor - M_PIf32;
             command_forward_vel = -command_forward_vel;
@@ -204,20 +226,20 @@ namespace control {
             } else {
 
                 float command_rotate_radius = 0.5f * std::sqrt(
-                        (m_steer_wheel[0].mount_position_x - m_steer_wheel[1].mount_position_x) *
-                        (m_steer_wheel[0].mount_position_x - m_steer_wheel[1].mount_position_x)
-                        + (m_steer_wheel[0].mount_position_y - m_steer_wheel[1].mount_position_y) *
-                          (m_steer_wheel[0].mount_position_y - m_steer_wheel[1].mount_position_y));
+                        (m_steer_wheel[0].mount_x - m_steer_wheel[1].mount_x) *
+                        (m_steer_wheel[0].mount_x - m_steer_wheel[1].mount_x)
+                        + (m_steer_wheel[0].mount_y - m_steer_wheel[1].mount_y) *
+                          (m_steer_wheel[0].mount_y - m_steer_wheel[1].mount_y));
 
                 float command_rotate_center_x = 0.0f;
                 float command_rotate_center_y = 0.0f;
 
                 m_steer_wheel[0].target_rot_angle =
-                        std::atan2(m_steer_wheel[0].mount_position_y - command_rotate_center_y,
-                                   m_steer_wheel[0].mount_position_x - command_rotate_center_x) + M_PI_2f32;
+                        std::atan2(m_steer_wheel[0].mount_y - command_rotate_center_y,
+                                   m_steer_wheel[0].mount_x - command_rotate_center_x) + M_PI_2f32;
                 m_steer_wheel[1].target_rot_angle =
-                        std::atan2(m_steer_wheel[1].mount_position_y - command_rotate_center_y,
-                                   m_steer_wheel[1].mount_position_x - command_rotate_center_x) + M_PI_2f32;
+                        std::atan2(m_steer_wheel[1].mount_y - command_rotate_center_y,
+                                   m_steer_wheel[1].mount_x - command_rotate_center_x) + M_PI_2f32;
 
 
                 m_steer_wheel[0].target_forward_vel = m_cmd_rot_vel * command_rotate_radius;
@@ -247,33 +269,33 @@ namespace control {
                 float command_rotate_center_y = std::abs(command_rotate_radius) * std::sin(command_rotate_angle);
 //                MLOGI("command_rotate_center_x: %.3f, command_rotate_center_y: %.3f", command_rotate_center_x,  command_rotate_center_y);
 
-                m_steer_wheel[0].target_rot_angle = std::atan2(m_steer_wheel[0].mount_position_y - command_rotate_center_y,
-                                                               m_steer_wheel[0].mount_position_x -
+                m_steer_wheel[0].target_rot_angle = std::atan2(m_steer_wheel[0].mount_y - command_rotate_center_y,
+                                                               m_steer_wheel[0].mount_x -
                                                                command_rotate_center_x) +
                                                     (m_cmd_rot_vel > 0.0 ? M_PI_2f32 : -M_PI_2f32);
-                m_steer_wheel[1].target_rot_angle = std::atan2(m_steer_wheel[1].mount_position_y - command_rotate_center_y,
-                                                               m_steer_wheel[1].mount_position_x -
+                m_steer_wheel[1].target_rot_angle = std::atan2(m_steer_wheel[1].mount_y - command_rotate_center_y,
+                                                               m_steer_wheel[1].mount_x -
                                                                command_rotate_center_x) +
                                                     (m_cmd_rot_vel > 0.0 ? M_PI_2f32 : -M_PI_2f32);
 //                MLOGI("m_steer_wheel[0].mount_position_x: %.3f, m_steer_wheel[0].mount_position_y: %.3f",  m_steer_wheel[0].mount_position_x, m_steer_wheel[0].mount_position_y);
 //                MLOGI("m_steer_wheel[1].mount_position_x: %.3f, m_steer_wheel[1].mount_position_y: %.3f", m_steer_wheel[1].mount_position_x, m_steer_wheel[1].mount_position_y);
 
-                float command_rotate_radius_1 = std::sqrt((m_steer_wheel[0].mount_position_x - command_rotate_center_x) *
-                                                          (m_steer_wheel[0].mount_position_x - command_rotate_center_x) +
-                                                          (m_steer_wheel[0].mount_position_y - command_rotate_center_y) *
-                                                          (m_steer_wheel[0].mount_position_y - command_rotate_center_y));
-                float command_rotate_radius_2 = std::sqrt((m_steer_wheel[1].mount_position_x - command_rotate_center_x) *
-                                                          (m_steer_wheel[1].mount_position_x - command_rotate_center_x) +
-                                                          (m_steer_wheel[1].mount_position_y - command_rotate_center_y) *
-                                                          (m_steer_wheel[1].mount_position_y - command_rotate_center_y));
+                float command_rotate_radius_1 = std::sqrt((m_steer_wheel[0].mount_x - command_rotate_center_x) *
+                                                          (m_steer_wheel[0].mount_x - command_rotate_center_x) +
+                                                          (m_steer_wheel[0].mount_y - command_rotate_center_y) *
+                                                          (m_steer_wheel[0].mount_y - command_rotate_center_y));
+                float command_rotate_radius_2 = std::sqrt((m_steer_wheel[1].mount_x - command_rotate_center_x) *
+                                                          (m_steer_wheel[1].mount_x - command_rotate_center_x) +
+                                                          (m_steer_wheel[1].mount_y - command_rotate_center_y) *
+                                                          (m_steer_wheel[1].mount_y - command_rotate_center_y));
 //                MLOGI("command_rotate_radius_1: %.3f, command_rotate_radius_2: %.3f", command_rotate_radius_1, command_rotate_radius_2);
 
                 float wheel_to_rotate_center_angle_1 = std::atan2(
-                        m_steer_wheel[0].mount_position_y - command_rotate_center_y,
-                        m_steer_wheel[0].mount_position_x - command_rotate_center_x);
+                        m_steer_wheel[0].mount_y - command_rotate_center_y,
+                        m_steer_wheel[0].mount_x - command_rotate_center_x);
                 float wheel_to_rotate_center_angle_2 = std::atan2(
-                        m_steer_wheel[1].mount_position_y - command_rotate_center_y,
-                        m_steer_wheel[1].mount_position_x - command_rotate_center_x);
+                        m_steer_wheel[1].mount_y - command_rotate_center_y,
+                        m_steer_wheel[1].mount_x - command_rotate_center_x);
 
                 wheel_to_rotate_center_angle_1 = angle_normalise(wheel_to_rotate_center_angle_1,
                                                                  m_steer_wheel[0].target_rot_angle);
@@ -535,8 +557,8 @@ namespace control {
             m_steer_wheel[i].config();
         }
 
-        constrain_angle = std::atan2(m_steer_wheel[1].mount_position_y - m_steer_wheel[0].mount_position_y,
-                                     m_steer_wheel[1].mount_position_x - m_steer_wheel[0].mount_position_x);
+        constrain_angle = std::atan2(m_steer_wheel[1].mount_y - m_steer_wheel[0].mount_y,
+                                     m_steer_wheel[1].mount_x - m_steer_wheel[0].mount_x);
 
         constrain_angle = std::abs(constrain_angle) < M_PI_2f32 ? constrain_angle : constrain_angle + (constrain_angle > 0.0f ? -M_PIf32 : M_PIf32  );
 
@@ -567,11 +589,11 @@ namespace control {
 
         float constrain_rotate_vel = 0.0;
 
-        float constrain_rotate_radius_1 = std::sqrt(m_steer_wheel[0].mount_position_x*m_steer_wheel[0].mount_position_x + m_steer_wheel[0].mount_position_y*m_steer_wheel[0].mount_position_y);
-        float constrain_rotate_radius_2 = std::sqrt(m_steer_wheel[1].mount_position_x*m_steer_wheel[1].mount_position_x + m_steer_wheel[1].mount_position_y*m_steer_wheel[1].mount_position_y);
+        float constrain_rotate_radius_1 = std::sqrt(m_steer_wheel[0].mount_x * m_steer_wheel[0].mount_x + m_steer_wheel[0].mount_y * m_steer_wheel[0].mount_y);
+        float constrain_rotate_radius_2 = std::sqrt(m_steer_wheel[1].mount_x * m_steer_wheel[1].mount_x + m_steer_wheel[1].mount_y * m_steer_wheel[1].mount_y);
 
-        constrain_rotate_radius_1 = m_steer_wheel[0].mount_position_x > 0.0 ? constrain_rotate_radius_1 : -constrain_rotate_radius_1;
-        constrain_rotate_radius_2 = m_steer_wheel[1].mount_position_x > 0.0 ? constrain_rotate_radius_2 : -constrain_rotate_radius_2;
+        constrain_rotate_radius_1 = m_steer_wheel[0].mount_x > 0.0 ? constrain_rotate_radius_1 : -constrain_rotate_radius_1;
+        constrain_rotate_radius_2 = m_steer_wheel[1].mount_x > 0.0 ? constrain_rotate_radius_2 : -constrain_rotate_radius_2;
 
 
         bool is_command_move = std::abs(m_steer_wheel[0].actual_forward_vel) > 0.001f || std::abs(m_steer_wheel[1].actual_forward_vel) > 0.001f;
@@ -729,32 +751,17 @@ namespace control {
         bool is_steer_rotate_zero_0 = std::abs(m_steer_wheel[0].actual_rot_angle) < rotate_angle_reach_thresh;
         bool is_steer_rotate_zero_1 = std::abs(m_steer_wheel[1].actual_rot_angle) < rotate_angle_reach_thresh;
 
-        bool is_steer_forward_synced_0 =
-                std::abs(m_steer_wheel[0].interpolate_command_forward_vel - m_steer_wheel[0].actual_forward_vel) <
-                forward_vel_reach_thresh;
-        bool is_steer_forward_synced_1 =
-                std::abs(m_steer_wheel[1].interpolate_command_forward_vel - m_steer_wheel[1].actual_forward_vel) <
-                forward_vel_reach_thresh;
+//        bool is_steer_forward_synced_0 = std::abs(m_steer_wheel[0].interpolate_command_forward_vel - m_steer_wheel[0].actual_forward_vel) < forward_vel_reach_thresh;
+//        bool is_steer_forward_synced_1 = std::abs(m_steer_wheel[1].interpolate_command_forward_vel - m_steer_wheel[1].actual_forward_vel) < forward_vel_reach_thresh;
 
 
-        bool is_steer_rotate_synced_0 =
-                std::abs(m_steer_wheel[0].interpolate_command_rotate_angle - m_steer_wheel[0].actual_angle_in_motor) <
-                rotate_angle_reach_thresh;
-        bool is_steer_rotate_synced_1 =
-                std::abs(m_steer_wheel[1].interpolate_command_rotate_angle - m_steer_wheel[1].actual_angle_in_motor) <
-                rotate_angle_reach_thresh;
 
-        PLOGD << "is_steer_forward_stopped_0: " << is_steer_forward_stopped_0 << ", "
-              << "is_steer_forward_stopped_1: " << is_steer_forward_stopped_0;
 
-        PLOGD << "is_steer_rotate_zero_0: " << is_steer_rotate_zero_0 << ", "
-              << "is_steer_rotate_zero_1: " << is_steer_rotate_zero_1;
 
-        PLOGD << "is_steer_forward_synced_0: " << is_steer_forward_synced_0 << ", "
-              << "is_steer_forward_synced_1: " << is_steer_forward_synced_1;
+//        bool is_steer_rotate_synced_0 = std::abs(m_steer_wheel[0].interpolate_command_rotate_angle - m_steer_wheel[0].actual_angle_in_motor) < rotate_angle_reach_thresh;
+//        bool is_steer_rotate_synced_1 = std::abs(m_steer_wheel[1].interpolate_command_rotate_angle - m_steer_wheel[1].actual_angle_in_motor) < rotate_angle_reach_thresh;
 
-        PLOGD << "is_steer_rotate_synced_0: " << is_steer_rotate_synced_0 << ", "
-              << "is_steer_rotate_synced_1: " << is_steer_rotate_synced_1;
+
 
 
         float rot_control_diff_1 = m_steer_wheel[0].command_rotate_angle - m_steer_wheel[0].actual_angle_in_motor;
@@ -867,12 +874,13 @@ namespace control {
                 }
             }else{
                 move_state_type = move_cmd_type;
-                move_state_flag = 0;
             }
             if(move_state_type != move_cmd_type){
                 interpolate_time = common::FromUnixNow();
                 interpolate_time_step_0 = common::FromUnixNow();
                 interpolate_time_step_1 = common::FromUnixNow();
+                move_state_flag = 0;
+
             }
         } else if (move_state_type == MoveType::Forward_And_Rotate) {
             if(move_cmd_type == MoveType::Inplace_Rotate){
@@ -888,12 +896,12 @@ namespace control {
 
             }else{
                 move_state_type = move_cmd_type;
-                move_state_flag = 0;
             }
             if(move_state_type != move_cmd_type){
                 interpolate_time = common::FromUnixNow();
                 interpolate_time_step_0 = common::FromUnixNow();
                 interpolate_time_step_1 = common::FromUnixNow();
+                move_state_flag = 0;
             }
         } else if (move_state_type == MoveType::Inplace_Rotate) {
 
@@ -910,7 +918,6 @@ namespace control {
 
             }else{
                 move_state_type = move_cmd_type;
-                move_state_flag = 0;
             }
             wheel_angle_reach = false;
 
@@ -918,19 +925,28 @@ namespace control {
                 interpolate_time = common::FromUnixNow();
                 interpolate_time_step_0 = common::FromUnixNow();
                 interpolate_time_step_1 = common::FromUnixNow();
+                move_state_flag = 0;
+
             }
         }
-
+#if 0
         float update_s  = control_period_sec;
         common::Time now = common::FromUnixNow();
         interpolate_time_step_1 = now;
         update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time_step_0)*1e-6;
         update_s = std::min(update_s,control_period_sec);
         interpolate_time_step_0 = now;
+        update_s = m_steer_wheel[0].predict_control_s;
+#endif
 
+//        PLOGF.printf("actual_vel: [%.3f, %.3f], is_steer_forward_stopped : [%i, %i]",m_steer_wheel[0].actual_forward_vel,m_steer_wheel[1].actual_forward_vel, is_steer_forward_stopped_0, is_steer_forward_stopped_1 );
+        // if robot start from stopped, rotate action need no sync check
 
-
-
+#if 0
+        if(is_steer_forward_stopped_0 || is_steer_forward_stopped_1){
+            bypass();
+        }
+#endif
 
         // **** state transform
 
@@ -949,10 +965,10 @@ namespace control {
                 // smooth forward_vel and rotate_angle
 
                 bool need_update = move_state_flag == 0
-                                   || ( is_steer_forward_synced_0 && is_steer_forward_synced_1);
+                                   || ( m_steer_wheel[0].forward_reached && m_steer_wheel[1].forward_reached);
 
 
-#if 0
+#if 1
                 if(need_update)
 #endif
                 {
@@ -1033,7 +1049,7 @@ namespace control {
 
                 }
 
-                if( is_steer_forward_synced_0 && is_steer_forward_synced_1){
+                if(m_steer_wheel[0].forward_reached && m_steer_wheel[1].forward_reached){
                     move_state_flag ++;
                 }
 
@@ -1078,12 +1094,12 @@ namespace control {
                 // direct rotate, keep 0 vel
 
                 bool need_update = move_state_flag == 0
-                                   || ( is_steer_rotate_synced_0 &&is_steer_rotate_synced_1);
+                                   || ( m_steer_wheel[0].rotate_reached &&m_steer_wheel[1].rotate_reached);
 
 
                 if(need_update){
                     {
-                        float rot_step = update_s * m_steer_wheel[0].max_rot_vel;
+                        float rot_step = m_steer_wheel[0].predict_control_s * m_steer_wheel[0].max_rotate_vel;
 
                         float rot_ratio_1 = rot_step / std::abs(
                                 rot_control_diff_1);
@@ -1115,18 +1131,21 @@ namespace control {
 
                 }
 
-
-                if(( is_steer_rotate_synced_0 &&is_steer_rotate_synced_1)){
-                    move_state_flag++;
-                }
+                move_state_flag++;
             }else{
 
-                bool need_update = move_state_flag == 0
-                                   || ( is_steer_forward_synced_0 && is_steer_forward_synced_1 && is_steer_rotate_synced_0 &&is_steer_rotate_synced_1);
+                bool need_update =
+                        move_state_flag == 0 ||
 
-                {
+                                   ( m_steer_wheel[0].forward_reached && m_steer_wheel[1].forward_reached
+                                   && m_steer_wheel[0].rotate_reached &&m_steer_wheel[1].rotate_reached
+                                   );
+//                PLOGF.printf("check_need_update: [%i, %i, %i]",move_state_flag, m_steer_wheel[0].forward_reached, m_steer_wheel[1].forward_reached);
 
-                    float rot_step = update_s * m_steer_wheel[0].max_rot_vel;
+                if(need_update){
+//                    PLOGF.printf("update once");
+
+                    float rot_step = m_steer_wheel[0].predict_control_s * m_steer_wheel[0].max_rotate_vel;
 
                     float rot_ratio_1 = rot_step / std::abs(
                             rot_control_diff_1);
@@ -1215,10 +1234,10 @@ namespace control {
                         || std::abs(steer_constrain_ratio_2) < rotate_constrain_thresh) {
                         ratio = (std::abs(valid_rot_in_base_1 - valid_rot_in_base_2) > M_PI_2f32) ? -1.0f : 1.0f;
 
-                        PLOGD << "ratio: " << ratio;
+//                        PLOGD << "ratio: " << ratio;
                     } else {
                         ratio = steer_constrain_ratio_1 / steer_constrain_ratio_2;
-                        PLOGD << "ratio: " << ratio;
+//                        PLOGD << "ratio: " << ratio;
 
                     }
 
@@ -1228,7 +1247,7 @@ namespace control {
 
                     {
                         // predict
-                        float vel_step = update_s * m_steer_wheel[0].max_forward_acc;
+                        float vel_step = m_steer_wheel[0].predict_control_s * m_steer_wheel[0].max_forward_acc;
 
                         float vel_ratio_1 = vel_step / std::abs(
                                 m_steer_wheel[0].command_forward_vel - m_steer_wheel[0].actual_forward_vel);
@@ -1245,9 +1264,24 @@ namespace control {
                                                                              m_steer_wheel[1].actual_forward_vel);
                     }
                     {
+
+
+                        // todo:check force sync
+                        float vel_diff_1 = std::abs( m_steer_wheel[0].actual_forward_vel);
+                        float vel_diff_2 = std::abs(m_steer_wheel[1].actual_forward_vel);
+
+//                        PLOGF.printf("check update_s: [%.3f], max_forward_acc: [%.3f], vel_diff: [%.3f, %.3f], valid_vel: [%.3f, %.3f]",m_steer_wheel[0].predict_control_s,m_steer_wheel[0].max_forward_acc, vel_diff_1,vel_diff_2,valid_vel_1, valid_vel_2);
+
+                        valid_vel_1 = vel_diff_1 < vel_diff_2 ? valid_vel_1:std::abs(valid_vel_2)* math::signum(valid_vel_1)/ std::abs(ratio) ;
+                        valid_vel_2 = vel_diff_2 < vel_diff_1 ? valid_vel_2:std::abs(valid_vel_1)* math::signum(valid_vel_2)*std::abs(ratio) ;
+
+
                         // constrain
                         constrain_vel_1 = std::abs(ratio) >= 1.0 ? (valid_vel_2 / ratio) : (valid_vel_1);
                         constrain_vel_2 = std::abs(ratio) >= 1.0 ? (valid_vel_2) : (ratio * valid_vel_1);
+
+//                        PLOGF.printf("check vel_diff: [%.3f, %.3f], valid_vel: [%.3f, %.3f], constrain_vel: [%.3f, %.3f]\n",vel_diff_1,vel_diff_2,valid_vel_1, valid_vel_2, constrain_vel_1, constrain_vel_2);
+
                     }
 
 //                    bool slow_down = std::abs(rot_control_diff_1) > 0.1 ||  std::abs(rot_control_diff_2) > 0.1;
@@ -1263,9 +1297,9 @@ namespace control {
 //                    PLOGF << "interpolate_command_rotate_angle: " <<m_steer_wheel[0].interpolate_command_rotate_angle <<  ", " <<m_steer_wheel[1].interpolate_command_rotate_angle;
 
                 }
-                if(is_steer_forward_synced_0 && is_steer_forward_synced_1&&is_steer_rotate_synced_0 &&is_steer_rotate_synced_1){
-                    move_state_flag ++;
-                }
+//                if(m_steer_wheel[0].forward_reached && m_steer_wheel[1].forward_reached && is_steer_rotate_synced_0 &&m_steer_wheel[1].rotate_reached){ }
+                move_state_flag ++;
+
             }
 
 #if 0
@@ -1317,12 +1351,12 @@ namespace control {
                 // direct rotate, keep 0 vel
 
                 bool need_update = move_state_flag == 0
-                                   || ( is_steer_rotate_synced_0 &&is_steer_rotate_synced_1);
+                                   || ( m_steer_wheel[0].rotate_reached &&m_steer_wheel[1].rotate_reached);
 
 
                 if(need_update){
                     {
-                        float rot_step = update_s * m_steer_wheel[0].max_rot_vel;
+                        float rot_step = m_steer_wheel[0].predict_control_s * m_steer_wheel[0].max_rotate_vel;
 
                         float rot_ratio_1 = rot_step / std::abs(
                                 rot_control_diff_1);
@@ -1350,13 +1384,10 @@ namespace control {
 
                 }
 
-
-                if(( is_steer_rotate_synced_0 &&is_steer_rotate_synced_1)){
-                    move_state_flag++;
-                }
+                move_state_flag++;
             }else{
                 bool need_update = move_state_flag == 0
-                                   || ( is_steer_forward_synced_0 && is_steer_forward_synced_1);
+                                   || ( m_steer_wheel[0].forward_reached && m_steer_wheel[1].forward_reached);
 
 
 
@@ -1400,7 +1431,7 @@ namespace control {
 
                     {
                         // predict
-                        float vel_step = update_s * m_steer_wheel[0].max_forward_acc;
+                        float vel_step = m_steer_wheel[0].predict_control_s * m_steer_wheel[0].max_forward_acc;
 
                         float vel_ratio_1 = vel_step / std::abs(
                                 m_steer_wheel[0].command_forward_vel - m_steer_wheel[0].actual_forward_vel);
@@ -1417,6 +1448,22 @@ namespace control {
                                                                              m_steer_wheel[1].actual_forward_vel);
                     }
                     {
+                        // todo:check force sync
+                        float vel_diff_1 = std::abs( m_steer_wheel[0].actual_forward_vel);
+                        float vel_diff_2 = std::abs( m_steer_wheel[1].actual_forward_vel);
+
+                        // force equal
+
+                        float min_vel = std::min(std::abs( m_steer_wheel[0].actual_forward_vel), std::abs( m_steer_wheel[1].actual_forward_vel));
+#if 0
+                        if(std::abs(vel_diff_1 - vel_diff_2) > m_forward_vel_drift_max){
+                            valid_vel_1= math::signum(valid_vel_1) *min_vel;
+                            valid_vel_2= math::signum(valid_vel_2) *min_vel;
+                        }
+#endif
+                        valid_vel_1 = vel_diff_1 < vel_diff_2 ? valid_vel_1:std::abs(valid_vel_2)* math::signum(valid_vel_1)/ std::abs(ratio) ;
+                        valid_vel_2 = vel_diff_2 < vel_diff_1 ? valid_vel_2:std::abs(valid_vel_1)* math::signum(valid_vel_2)*std::abs(ratio) ;
+
                         // constrain
                         constrain_vel_1 = std::abs(ratio) >= 1.0 ? (valid_vel_2 / ratio) : (valid_vel_1);
                         constrain_vel_2 = std::abs(ratio) >= 1.0 ? (valid_vel_2) : (ratio * valid_vel_1);
@@ -1432,6 +1479,9 @@ namespace control {
 
                     m_steer_wheel[0].interpolate_command_forward_vel = constrain_vel_1;
                     m_steer_wheel[1].interpolate_command_forward_vel = constrain_vel_2;
+
+                   m_steer_wheel[0].interpolate_command_rotate_angle = m_steer_wheel[0].command_rotate_angle;
+                   m_steer_wheel[1].interpolate_command_rotate_angle = m_steer_wheel[1].command_rotate_angle;
 #if 0
                    if(std::abs(m_steer_wheel[0].actual_forward_vel) < m_steer_wheel[0].min_forward_vel || std::abs(m_steer_wheel[1].actual_forward_vel) < m_steer_wheel[1].min_forward_vel) {
                        m_steer_wheel[0].interpolate_command_forward_vel = 0.0;
@@ -1440,7 +1490,7 @@ namespace control {
 #endif
                 }
 
-               if(( is_steer_forward_synced_0 && is_steer_forward_synced_1)){
+               if(( m_steer_wheel[0].forward_reached && m_steer_wheel[1].forward_reached)){
                    move_state_flag++;
                }
 
@@ -1766,7 +1816,11 @@ namespace control {
 
 
     }
-
+    void DoubleSteerController::bypass(){
+        for(size_t i = 0 ; i < m_steer_wheel.size();i++){
+            m_steer_wheel[i].check(true);
+        }
+    }
     void DoubleSteerController::setPrefer(bool prefer) {
         m_use_prefer_angle = prefer;
     }
@@ -1785,8 +1839,8 @@ namespace control {
         m_steer_wheel[0].time = common::FromUnixNow();
         m_steer_wheel[1].time = common::FromUnixNow();
 
-        constrain_angle = std::atan2(m_steer_wheel[1].mount_position_y - m_steer_wheel[0].mount_position_y,
-                                     m_steer_wheel[1].mount_position_x - m_steer_wheel[0].mount_position_x);
+        constrain_angle = std::atan2(m_steer_wheel[1].mount_y - m_steer_wheel[0].mount_y,
+                                     m_steer_wheel[1].mount_x - m_steer_wheel[0].mount_x);
 
     }
 
@@ -1823,7 +1877,7 @@ namespace control {
 
             m_steer_wheel[0].actual_forward_vel = vel_1;//  +common::uniform_real<float>(-0.005f,0.05f);
 
-            float rot_step = update_s * m_steer_wheel[0].max_rot_vel;
+            float rot_step = update_s * m_steer_wheel[0].max_rotate_vel;
 
             float rot_ratio_1 =
                     rot_step / std::abs(m_steer_wheel[0].target_rot_angle - m_steer_wheel[0].actual_rot_angle);
@@ -1854,7 +1908,7 @@ namespace control {
 
             m_steer_wheel[1].actual_forward_vel = vel_1;// + common::uniform_real<float>(-0.005f,0.05f);
 
-            float rot_step = update_s * m_steer_wheel[1].max_rot_vel;
+            float rot_step = update_s * m_steer_wheel[1].max_rotate_vel;
 
             float rot_ratio_1 =
                     rot_step / std::abs(m_steer_wheel[1].target_rot_angle - m_steer_wheel[1].actual_rot_angle);

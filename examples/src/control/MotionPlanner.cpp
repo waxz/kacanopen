@@ -52,6 +52,7 @@ namespace control{
 //        m_odom_base_buffer.clear();
         m_track_path_info.clear();
         m_stable_pose_get = false;
+        off_width_once = false;
         m_task_state = TaskState::idle;
         m_planner_state = PlannerState::idle;
 
@@ -135,6 +136,12 @@ namespace control{
 
         float time_diff = common::ToMillSeconds(m_global_path.time - m_actual_pose.time)*1e-3;
 
+        std::string task_stamp, pose_stamp;
+        common::formatTimestamp(m_global_path.time , task_stamp);
+        common::formatTimestamp(m_actual_pose.time , pose_stamp);
+
+        PLOGF << "get task: " <<m_task_frame <<", task_stamp: " << task_stamp << ", pose_stamp: " << pose_stamp;
+
 #if 1
         float max_time_diff = 0.5;
         if(!ok || ( std::abs( time_diff) > max_time_diff) ){
@@ -143,7 +150,7 @@ namespace control{
             char buffer[100];
             sprintf(buffer,"path_error: time is not in tolerance, %.3f > %.3f", time_diff,max_time_diff);
             m_status_msg.assign(buffer);
-
+            PLOGF << m_status_msg;
             return;
         }
 #endif
@@ -179,6 +186,7 @@ namespace control{
                 char buffer[100];
                 sprintf(buffer,"rotate_error: goal_dist is not in tolerance, %.3f > %.3f", goal_dist,max_dist);
                 m_status_msg.assign(buffer);
+                PLOGF << m_status_msg;
 
             }
 
@@ -291,6 +299,13 @@ namespace control{
 
         bool ok = getStablePose();
 
+        std::string task_stamp, pose_stamp;
+        common::formatTimestamp(m_global_path.time , task_stamp);
+        common::formatTimestamp(m_actual_pose.time , pose_stamp);
+
+        PLOGF << "get task: " <<m_task_frame <<", task_stamp: " << task_stamp << ", pose_stamp: " << pose_stamp;
+
+
         float time_diff = common::ToMillSeconds(m_global_path.time - m_actual_pose.time)*1e-3;
 #if 1
         float max_time_diff = 0.5;
@@ -300,6 +315,8 @@ namespace control{
             char buffer[100];
             sprintf(buffer,"path_error: time is not in tolerance, %.3f > %.3f", time_diff,max_time_diff);
             m_status_msg.assign(buffer);
+            PLOGF << m_status_msg;
+
             return;
 
         }
@@ -669,17 +686,17 @@ namespace control{
         m_max_base_forward_acc = config[0].max_forward_acc;
         m_min_base_forward_vel = config[0].min_forward_vel;
 
-        m_max_base_rotate_vel = config[0].max_forward_vel/std::sqrt(config[0].mount_position_x*config[0].mount_position_x + config[0].mount_position_y*config[0].mount_position_y  );
+        m_max_base_rotate_vel = config[0].max_forward_vel/std::sqrt(config[0].mount_x * config[0].mount_x + config[0].mount_y * config[0].mount_y  );
 
-        m_max_base_rotate_acc = config[0].max_forward_acc/std::sqrt(config[0].mount_position_x*config[0].mount_position_x + config[0].mount_position_y*config[0].mount_position_y  );
+        m_max_base_rotate_acc = config[0].max_forward_acc/std::sqrt(config[0].mount_x * config[0].mount_x + config[0].mount_y * config[0].mount_y  );
 
-        m_min_base_rotate_vel = config[0].min_forward_vel/std::sqrt(config[0].mount_position_x*config[0].mount_position_x + config[0].mount_position_y*config[0].mount_position_y  );
+        m_min_base_rotate_vel = config[0].min_forward_vel/std::sqrt(config[0].mount_x * config[0].mount_x + config[0].mount_y * config[0].mount_y  );
 
 
-        m_max_base_forward_angle_vel = config[0].max_rot_vel;
+        m_max_base_forward_angle_vel = config[0].max_rotate_vel;
         m_max_base_forward_angle_acc = config[0].max_rot_acc;
 
-        m_max_wheel_rotate_angle = config[0].max_rot_angle;
+        m_max_wheel_rotate_angle = config[0].max_rotate_angle;
 
 
         m_base_config_done = true;
@@ -842,7 +859,7 @@ namespace control{
             m_track_path_info[0].segment_id = 1;
 
 
-            int log_level = 1;
+            int log_level = 4;
 
             PLOG(plog::Severity(log_level)) << "check m_track_path_info";
             for(size_t i = 1 ; i < pose_num  ;i++){
@@ -885,6 +902,8 @@ namespace control{
                 char buffer[100];
                 sprintf(buffer,"path_error: path contains rotation");
                 m_status_msg.assign(buffer);
+                PLOGF << m_status_msg;
+
                 return false;
             }
 
@@ -1292,6 +1311,7 @@ namespace control{
                     char buffer[100];
                     sprintf(buffer,"path_error: closest_dist = %.3f > %.3f",closest_dist,m_planner_config.start_pose_dist);
                     m_status_msg.assign(buffer);
+                    PLOGF << m_status_msg;
 
                     return false;
                 }
@@ -1305,6 +1325,7 @@ namespace control{
                 char buffer[100];
                 sprintf(buffer,"path_error: steer_rotate_limit not ok");
                 m_status_msg.assign(buffer);
+                PLOGF << m_status_msg;
 
                 return false;
             }
@@ -1952,6 +1973,21 @@ namespace control{
         {
             float best_diff = 10000.0f;
 
+#if 0
+            float best_id_interpolate = 0.1f;
+
+            for(float f = 0.1f;f < pose_num - 1 ; f += 0.2f ){
+                int i = int(best_id_interpolate);
+                auto n = transform::interpolate(best_id_interpolate - i,local_path[i],local_path[i+1] );
+
+                float base_to_target_yaw = angle_normalise(std::atan2(n.y() - actual_pose_y, n.x() - actual_pose_x ), base_to_target_yaw_init );
+                float target_path_yaw = angle_normalise(m_track_path_info[m_closest_path_node_id + i].direction, target_path_yaw_init );
+
+                float diff = std::abs(  angle_normalise(base_to_target_yaw, target_path_yaw) - target_path_yaw);
+                best_diff = (diff < best_diff)? (best_id_interpolate = f  , diff) : best_diff;
+            }
+#endif
+
             size_t best_id = 0;
             for(size_t i = 0 ; i < pose_num ; i++){
                 float base_to_target_yaw = angle_normalise(std::atan2(local_path[i].y() - actual_pose_y, local_path[i].x() - actual_pose_x ), base_to_target_yaw_init );
@@ -1962,7 +1998,18 @@ namespace control{
 
             }
 
-            m_forward_angle = std::atan2(local_path[best_id].y() - actual_pose_y, local_path[best_id].x() - actual_pose_x );
+            int best_weight = 3;
+            float goal_y_sum = best_weight*local_path[best_id].y(), goal_x_sum = best_weight*local_path[best_id].x();
+            for(size_t i = best_id+1;i <pose_num;i++ ){
+                goal_y_sum += local_path[i].y();
+                goal_x_sum += local_path[i].x();
+            }
+            goal_y_sum/=float(pose_num - best_id + best_weight - 1);
+            goal_x_sum/=float(pose_num - best_id + best_weight - 1);
+
+
+            float temp_forward_angle = std::atan2(goal_y_sum - actual_pose_y, goal_x_sum - actual_pose_x );
+            m_forward_angle = temp_forward_angle;
 
         }
 
@@ -1972,17 +2019,17 @@ namespace control{
             m_forward_angle = std::min(m_allow_angle_max[1], std::max(m_forward_angle, m_allow_angle_min[1]));
         }
 
-        PLOGF << "base_to_target_yaw_sum: " << base_to_target_yaw_sum;
-        PLOGF << "target_path_yaw_sum: " << target_path_yaw_sum;
-        PLOGF << "rotate_angle: " << m_forward_angle;
+        PLOGI << "base_to_target_yaw_sum: " << base_to_target_yaw_sum;
+        PLOGI << "target_path_yaw_sum: " << target_path_yaw_sum;
+        PLOGI << "rotate_angle: " << m_forward_angle;
 
-        return false;
+        return true;
     }
 
     bool DoubleSteerMotionPlanner::createLocalPath_v1() {
 
 
-        int log_level = 1;
+        int log_level = 4;
 
         // time
         common::Time now = common::FromUnixNow();
@@ -2194,8 +2241,10 @@ namespace control{
             if(std::abs(closest_node_offset_y) > m_planner_config.off_path_dist){
 
                 char buffer[100];
-                sprintf(buffer,"control error: robot run off the path: %.3f > %.3f",closest_node_offset_y , m_planner_config.off_path_dist);
+                sprintf(buffer,"control_error: robot run off the path: %.3f > %.3f",closest_node_offset_y , m_planner_config.off_path_dist);
                 m_status_msg.assign(buffer);
+                PLOGF << m_status_msg;
+
                 m_task_state = TaskState::off_path;
                 return false;
             }
@@ -2207,7 +2256,13 @@ namespace control{
             bool is_on_line_path = m_track_path_info[m_closest_path_node_id].segment_type == 0;
             bool is_on_left_turn_path = m_track_path_info[m_closest_path_node_id].segment_type == 1;
             bool is_on_right_turn_path = m_track_path_info[m_closest_path_node_id].segment_type == -1;
-            bool in_path_width = std::abs(closest_node_offset_y) < m_planner_config.pursuit_path_width;
+            bool at_segment_end = m_track_path_info[m_closest_path_node_id].dist_to_segment_end < curve_interpolate_dist_2;
+
+            float path_width = m_planner_config.pursuit_path_width*(at_segment_end ? 0.5f:1.0f);
+            bool in_path_width = std::abs(closest_node_offset_y) < path_width ;
+
+
+            bool in_path_close = std::abs(closest_node_offset_y) < 0.5f*path_width ;
 
             size_t segment_end_id = m_track_path_info[m_closest_path_node_id].segment_end_id;
 
@@ -2230,18 +2285,33 @@ namespace control{
 
 
 
-            }else if(is_on_line_path && m_track_path_info[m_closest_path_node_id].dist_to_segment_end >curve_interpolate_dist_2 ){
+            }else if(is_on_line_path
+
+//            && m_track_path_info[m_closest_path_node_id].dist_to_segment_end >curve_interpolate_dist_2
+
+            ){
                 size_t target_id = segment_end_id;
 
 
-                float base_to_goal_yaw = m_track_path_info[target_id].direction;
+                float base_to_goal_yaw = angle_normalise_zero(m_track_path_info[target_id].direction);
                 float goal_yaw = global_path[target_id].yaw();
 
                 m_rotate_diff = angle_normalise(goal_yaw, actual_pose_yaw) - actual_pose_yaw;
 
-                if(in_path_width){
+                if(!in_path_width){
+                    off_width_once = true;
+                }
+                if(in_path_close){
+                    off_width_once = false;
+                }
+
+
+
+                if(in_path_width && !off_width_once// && beyond_end
+                ){
                     m_forward_angle = angle_normalise(base_to_goal_yaw, actual_pose_yaw) - actual_pose_yaw;
-                }else{
+                }else
+                {
                     if(odom_twist_vel < 0.04){
                         m_rotate_vel = 0.0f;
                         m_rotate_diff = 0.0f;
@@ -2254,9 +2324,18 @@ namespace control{
 
 
             }else {
+                // todo: followLocalPath is not stable
+               bool ok =  followLocalPath();
 
-                followLocalPath();
+               if(!ok){
+                   char buffer[100];
+                   sprintf(buffer,"control_error: followLocalPath fail");
+                   m_status_msg.assign(buffer);
+                   PLOGF << m_status_msg;
 
+                   m_task_state = TaskState::off_path;
+                   return false;
+               }
             }
 
 
@@ -2388,7 +2467,8 @@ namespace control{
 //        float base_yaw_error = angle_normalise(target_yaw_map, base_yaw_map)-base_yaw_map;
 
 //        float max_rot_vel =base_yaw_error>0.0  ? m_planner_config.pursuit_path_angle_rot_vel_max:-m_planner_config.pursuit_path_angle_rot_vel_max;
-        float goal_angle_pid_p = m_planner_config.pursuit_path_angle_pid_p;
+        float goal_angle_pid_p = m_planner_config.pursuit_path_rotate_vel_angle_p;
+        float pursuit_path_rotate_vel_vel_p = m_planner_config.pursuit_path_rotate_vel_vel_p;
 
 #if 0
         float goal_forward_vel = std::min(dynamic_v,m_planner_config.pursuit_path_forward_vel);
@@ -2406,6 +2486,7 @@ namespace control{
 
 //        command_angular_z = goal_angle_pid_p*base_yaw_error/(std::abs(full_path_len - m_planner_config.pursuit_goal_dist)/goal_forward_vel+1e-6f);
         command_angular_z = std::max(std::min(command_angular_z,m_planner_config.pursuit_path_angle_rot_vel_max ),-m_planner_config.pursuit_path_angle_rot_vel_max  );
+        command_angular_z = std::max(std::min(command_angular_z,  std::abs(pursuit_path_rotate_vel_vel_p* m_forward_vel)),-std::abs(pursuit_path_rotate_vel_vel_p* m_forward_vel)  );
 
         // forbid rotate
         //1. start
@@ -2418,19 +2499,19 @@ namespace control{
         std::abs(m_driver_controller.m_steer_wheel[0].command_rotate_angle - m_driver_controller.m_steer_wheel[1].command_rotate_angle  ) > M_PI_2f32
         ){
             command_angular_z = 0.0f;
-            PLOGF << "force no rotate,  angle: " << m_driver_controller.m_steer_wheel[0].command_rotate_angle << ", " << m_driver_controller.m_steer_wheel[1].command_rotate_angle ;
+            PLOGI << "force no rotate,  angle: " << m_driver_controller.m_steer_wheel[0].command_rotate_angle << ", " << m_driver_controller.m_steer_wheel[1].command_rotate_angle ;
 
         }
-        PLOGD << "goal_forward_vel: " << m_forward_vel;
-        PLOGD << "goal_angle_pid_p: " << goal_angle_pid_p;
+        PLOGI << "goal_forward_vel: " << m_forward_vel;
+        PLOGI << "goal_angle_pid_p: " << goal_angle_pid_p;
 //        PLOGD << "wheel_yaw_base: " << wheel_yaw_base;
 //        PLOGD << "base_yaw_error: " << base_yaw_error;
-        PLOGF << "m_rotate_diff: " << m_rotate_diff;
-        PLOGF << "command_linear_x: " << command_linear_x;
-        PLOGF << "command_linear_y: " << command_linear_y;
-        PLOGF << "command_angular_z: " << command_angular_z;
+        PLOGI << "m_rotate_diff: " << m_rotate_diff;
+        PLOGI << "command_linear_x: " << command_linear_x;
+        PLOGI << "command_linear_y: " << command_linear_y;
+        PLOGI << "command_angular_z: " << command_angular_z;
 
-        PLOGF << "full_path_len: " << full_path_len;
+        PLOGI << "full_path_len: " << full_path_len;
 
         // reach goal range
         //dist_to_goal
@@ -2439,7 +2520,7 @@ namespace control{
 //            command_linear_x = 0.0;
 //            command_linear_y = 0.0;
 //
-//            command_angular_z = 0.0;
+            command_angular_z = 0.0;
             return true;
         }
 
