@@ -28,7 +28,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
- 
+
 #include <chrono>
 #include <vector>
 #include <iostream>
@@ -73,24 +73,26 @@
 #include "common/random.h"
 
 #define SOL_CHECK_ARGUMENTS 1
+
 #include <sol.hpp>
 
-struct IntInt{
+struct IntInt {
     int num_1 = 0;
     int num_2 = 0;
 };
 
-struct BitArray{
+struct BitArray {
     std::bitset<64> data;
 };
 
-IntInt to_common(const kaco::Message& data){
+IntInt to_common(const kaco::Message &data) {
     IntInt target;
-    target.num_1 = * (int*)(&data.data[0]);
-    target.num_2 = * (int*)(&data.data[4]);
+    target.num_1 = *(int *) (&data.data[0]);
+    target.num_2 = *(int *) (&data.data[4]);
     return target;
 }
-void from_common(const IntInt& data, kaco::Message& target){
+
+void from_common(const IntInt &data, kaco::Message &target) {
 
 #if 0
     *(int*)(&target.data[0]) = data.num_1;
@@ -98,10 +100,10 @@ void from_common(const IntInt& data, kaco::Message& target){
 
 #endif
 #if 1
-    int* p1 = (int*)(&target.data[0]);
-    int* p2 = (int*)(&target.data[4]);
-    *p1 =  data.num_1;
-    *p2 =  data.num_2;
+    int *p1 = (int *) (&target.data[0]);
+    int *p2 = (int *) (&target.data[4]);
+    *p1 = data.num_1;
+    *p2 = data.num_2;
 #endif
 #if 0
     for(size_t i = 0 ; i < 4;i++){
@@ -112,18 +114,18 @@ void from_common(const IntInt& data, kaco::Message& target){
 }
 
 
-void to_common(const kaco::Message& data,BitArray& target){
+void to_common(const kaco::Message &data, BitArray &target) {
 
-    target.data = * (u_int64_t *)(&data.data[0]);
+    target.data = *(u_int64_t *) (&data.data[0]);
 }
 
 
-struct AngleStamped{
+struct AngleStamped {
     common::Time time = common::FromUnixNow();
     float angle = 0;
 };
 
-struct ControllerConfig{
+struct ControllerConfig {
 
     bool use_rot_angle_abs = false;
     bool is_rot_angle_calib = false;
@@ -151,13 +153,11 @@ struct ControllerConfig{
     float comm_timeout_s = 0.2f;
 
 
-
     float max_forward_vel = 0.5;
     float max_forward_acc = 0.8;
     float max_rotate_angle = 1.9;
     float max_rotate_vel = 3.0;
     float min_forward_vel = 0.05;
-
 
 
     float actual_rot_angle = 0.0;
@@ -172,15 +172,13 @@ struct ControllerConfig{
     bool forward_feedback_timeout = false;
     bool rotate_feedback_timeout = false;
 
-    
-    
 
-    void addAngle(float angle){
+    void addAngle(float angle) {
 
         actual_rot_angle = angle;
-        if(use_rot_angle_abs){
-            angle_buffer.add( angle );
-        }else{
+        if (use_rot_angle_abs) {
+            angle_buffer.add(angle);
+        } else {
             rot_angle_abs_offset = 0.0;
             is_rot_angle_calib = true;
             actual_rot_abs_angle = actual_rot_angle;
@@ -188,51 +186,55 @@ struct ControllerConfig{
 
 
     }
-    void addAngleAbs(float angle){
 
-        if(use_rot_angle_abs){
+    void addAngleAbs(float angle) {
+
+        if (use_rot_angle_abs) {
             actual_rot_abs_angle = angle;
-            angle_abs_buffer.add( angle );
-        }else{
+            angle_abs_buffer.add(angle);
+        } else {
 //            is_rot_angle_calib = true;
         }
 
     }
-    bool isAngleCalib(){
+
+    bool isAngleCalib() {
 
         return is_rot_angle_calib;
     }
 
-    float getActualRotateAngle(){
-        if(use_rot_angle_abs){
+    float getActualRotateAngle() {
+        if (use_rot_angle_abs) {
             angleCalib();
             return actual_rot_angle + rot_angle_abs_offset;
-        }else{
+        } else {
             return actual_rot_angle;
         }
     }
-    bool angleCalib(){
 
-        if(!use_rot_angle_abs){
+    bool angleCalib() {
+
+        if (!use_rot_angle_abs) {
             rot_angle_abs_offset = 0.0;
             return true;
         }
         is_rot_angle_calib = !use_rot_angle_abs;
-        if(angle_abs_buffer.size() < 10 || angle_buffer.size() < 10 ){
+        if (angle_abs_buffer.size() < 10 || angle_buffer.size() < 10) {
             return false;
         }
 
-        common::Time check_point = angle_abs_buffer.back().time > angle_buffer.back().time ? angle_buffer.back().time : angle_abs_buffer.back().time;
+        common::Time check_point = angle_abs_buffer.back().time > angle_buffer.back().time ? angle_buffer.back().time
+                                                                                           : angle_abs_buffer.back().time;
 
         float angle, angle_abs;
-        bool ok1 = angle_buffer.query(check_point,angle);
-        bool ok2 = angle_abs_buffer.query(check_point,angle_abs);
+        bool ok1 = angle_buffer.query(check_point, angle);
+        bool ok2 = angle_abs_buffer.query(check_point, angle_abs);
         PLOGD << "query angle: " << angle;
         PLOGD << "query angle_abs: " << angle_abs;
 
 
         is_rot_angle_calib = ok1 && ok2;
-        if(is_rot_angle_calib){
+        if (is_rot_angle_calib) {
 
             rot_angle_abs_offset = angle_abs - angle;
         }
@@ -242,7 +244,8 @@ struct ControllerConfig{
     }
 
 };
-struct ControllerState{
+
+struct ControllerState {
     ControllerConfig config;
     IntInt state;
     IntInt command;
@@ -273,16 +276,17 @@ struct ControllerState{
     common::Time last_update_time;
 
     bool updated = false;
-    void reset(){
+
+    void reset() {
         msg_num = 0;
         last_update_time = common::FromUnixNow();
     }
 
 
-    void createCommand(float command_forward_vel, float command_rot_angle){
+    void createCommand(float command_forward_vel, float command_rot_angle) {
 
-        command.num_1 = command_forward_vel/config.forward_speed_k;
-        command.num_2 = (command_rot_angle - config.rot_angle_b)/config.rot_angle_k;
+        command.num_1 = command_forward_vel / config.forward_speed_k;
+        command.num_2 = (command_rot_angle - config.rot_angle_b) / config.rot_angle_k;
 //        PLOGD << "command_forward_vel: " << command_forward_vel << ", command_rot_angle: " << command_rot_angle ;
 //        PLOGD << "command.num_1: " << command.num_1 << ", command.num_2: " << command.num_2 ;
 
@@ -291,8 +295,6 @@ struct ControllerState{
     }
 
 };
-
-
 
 
 constexpr auto ControllerConfig_properties = std::make_tuple(
@@ -317,35 +319,35 @@ constexpr auto ControllerConfig_properties = std::make_tuple(
 
 
 );
-void to_json(nlohmann::json& j, const ControllerConfig& object)
-{
+
+void to_json(nlohmann::json &j, const ControllerConfig &object) {
 
     constexpr auto nbProperties = std::tuple_size<decltype(ControllerConfig_properties)>::value;
     common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
         // get the property
-        auto& property = std::get<i>(ControllerConfig_properties);
+        auto &property = std::get<i>(ControllerConfig_properties);
         // set the value to the member
         j[property.name] = object.*(property.member);
     });
 }
 
-void from_json(const nlohmann::json& j, ControllerConfig& object) {
+void from_json(const nlohmann::json &j, ControllerConfig &object) {
 
     constexpr auto nbProperties = std::tuple_size<decltype(ControllerConfig_properties)>::value;
     common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
         // get the property
-        auto& property = std::get<i>(ControllerConfig_properties);
+        auto &property = std::get<i>(ControllerConfig_properties);
         // set the value to the member
-        if(j.contains(property.name))
-        j.at(property.name).get_to(object.*(property.member));
-        else{
-            std::cerr << "from_json: key["<<property.name<<"] not exist"<< std::endl;
+        if (j.contains(property.name))
+            j.at(property.name).get_to(object.*(property.member));
+        else {
+            std::cerr << "from_json: key[" << property.name << "] not exist" << std::endl;
         }
     });
 }
 
 
-struct RawCommand{
+struct RawCommand {
     float forward_vel_1 = 0.0;
     float forward_vel_2 = 0.0;
 
@@ -396,7 +398,8 @@ constexpr auto PlannerConfig_properties = std::make_tuple(
         //pursuit_path_width
         common::property(&control::PlannerConfig::pursuit_path_width, "pursuit_path_width"),
 
-        common::property(&control::PlannerConfig::pursuit_path_width_direction_adjust, "pursuit_path_width_direction_adjust"),
+        common::property(&control::PlannerConfig::pursuit_path_width_direction_adjust,
+                         "pursuit_path_width_direction_adjust"),
 
 
         common::property(&control::PlannerConfig::off_path_dist, "off_path_dist"),
@@ -438,78 +441,79 @@ constexpr auto PlannerConfig_properties = std::make_tuple(
         common::property(&control::PlannerConfig::pursuit_goal_forward_vel_pid_p, "pursuit_goal_forward_vel_pid_p"),
         common::property(&control::PlannerConfig::pursuit_goal_forward_vel_min, "pursuit_goal_forward_vel_min"),
         common::property(&control::PlannerConfig::pursuit_goal_forward_vel_max, "pursuit_goal_forward_vel_max"),
-        common::property(&control::PlannerConfig::pursuit_goal_final_forward_vel_pid_p, "pursuit_goal_final_forward_vel_pid_p"),
-        common::property(&control::PlannerConfig::pursuit_goal_final_forward_vel_min, "pursuit_goal_final_forward_vel_min"),
-        common::property(&control::PlannerConfig::pursuit_goal_final_forward_vel_max, "pursuit_goal_final_forward_vel_max")
+        common::property(&control::PlannerConfig::pursuit_goal_final_forward_vel_pid_p,
+                         "pursuit_goal_final_forward_vel_pid_p"),
+        common::property(&control::PlannerConfig::pursuit_goal_final_forward_vel_min,
+                         "pursuit_goal_final_forward_vel_min"),
+        common::property(&control::PlannerConfig::pursuit_goal_final_forward_vel_max,
+                         "pursuit_goal_final_forward_vel_max")
 
 
-        );
+);
 
-namespace control{
+namespace control {
 
-    void to_json(nlohmann::json& j, const PlannerConfig& object)
-    {
+    void to_json(nlohmann::json &j, const PlannerConfig &object) {
 
         constexpr auto nbProperties = std::tuple_size<decltype(PlannerConfig_properties)>::value;
         common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
             // get the property
-            auto& property = std::get<i>(PlannerConfig_properties);
+            auto &property = std::get<i>(PlannerConfig_properties);
             // set the value to the member
             j[property.name] = object.*(property.member);
         });
     }
 
 
-    void from_json(const nlohmann::json& j, PlannerConfig& object) {
+    void from_json(const nlohmann::json &j, PlannerConfig &object) {
 
         constexpr auto nbProperties = std::tuple_size<decltype(PlannerConfig_properties)>::value;
         common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
             // get the property
-            auto& property = std::get<i>(PlannerConfig_properties);
+            auto &property = std::get<i>(PlannerConfig_properties);
             // set the value to the member
-            if(j.contains(property.name))
+            if (j.contains(property.name))
                 j.at(property.name).get_to(object.*(property.member));
-            else{
-                std::cerr << "from_json: key["<<property.name<<"] not exist"<< std::endl;
+            else {
+                std::cerr << "from_json: key[" << property.name << "] not exist" << std::endl;
             }
         });
     }
 }
 
-void to_json(nlohmann::json& j, const RawCommand& object)
-{
+void to_json(nlohmann::json &j, const RawCommand &object) {
 
     constexpr auto nbProperties = std::tuple_size<decltype(RawCommand_properties)>::value;
     common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
         // get the property
-        auto& property = std::get<i>(RawCommand_properties);
+        auto &property = std::get<i>(RawCommand_properties);
         // set the value to the member
         j[property.name] = object.*(property.member);
     });
 }
 
-void from_json(const nlohmann::json& j, RawCommand& object) {
+void from_json(const nlohmann::json &j, RawCommand &object) {
 
     constexpr auto nbProperties = std::tuple_size<decltype(RawCommand_properties)>::value;
     common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
         // get the property
-        auto& property = std::get<i>(RawCommand_properties);
+        auto &property = std::get<i>(RawCommand_properties);
         // set the value to the member
-        if(j.contains(property.name))
+        if (j.contains(property.name))
             j.at(property.name).get_to(object.*(property.member));
-        else{
-            std::cerr << "from_json: key["<<property.name<<"] not exist"<< std::endl;
+        else {
+            std::cerr << "from_json: key[" << property.name << "] not exist" << std::endl;
         }
     });
 }
 
-struct Controller{
+struct Controller {
     ControllerState state;
     ControllerConfig config;
 };
 
 
-struct CanMsgForward{
+struct CanMsgForward {
     size_t channel_id = 0;
     std::vector<uint32_t> recv_cob_id;
     std::string sub_topic;
@@ -517,45 +521,44 @@ struct CanMsgForward{
 };
 constexpr auto CanMsgForward_properties = std::make_tuple(
         common::property(&CanMsgForward::channel_id, "channel_id"),
-        common::property(&CanMsgForward::recv_cob_id, "recv_cob_id") ,
+        common::property(&CanMsgForward::recv_cob_id, "recv_cob_id"),
         common::property(&CanMsgForward::sub_topic, "sub_topic"),
         common::property(&CanMsgForward::pub_topic, "pub_topic")
 );
 
-void to_json(nlohmann::json& j, const CanMsgForward& object)
-{
+void to_json(nlohmann::json &j, const CanMsgForward &object) {
 
     constexpr auto nbProperties = std::tuple_size<decltype(CanMsgForward_properties)>::value;
     common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
         // get the property
-        auto& property = std::get<i>(CanMsgForward_properties);
+        auto &property = std::get<i>(CanMsgForward_properties);
         // set the value to the member
         j[property.name] = object.*(property.member);
     });
 }
 
-void from_json(const nlohmann::json& j, CanMsgForward& object) {
+void from_json(const nlohmann::json &j, CanMsgForward &object) {
 
     constexpr auto nbProperties = std::tuple_size<decltype(CanMsgForward_properties)>::value;
     common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
         // get the property
-        auto& property = std::get<i>(CanMsgForward_properties);
+        auto &property = std::get<i>(CanMsgForward_properties);
         // set the value to the member
-        if(j.contains(property.name))
+        if (j.contains(property.name))
 //            object.*(property.member) = j[property.name];
-           j.at(property.name).get_to(object.*(property.member));
-        else{
-            std::cerr << "from_json: key["<<property.name<<"] not exist"<< std::endl;
+            j.at(property.name).get_to(object.*(property.member));
+        else {
+            std::cerr << "from_json: key[" << property.name << "] not exist" << std::endl;
         }
     });
 }
 
-struct PathConfig{
+struct PathConfig {
 
     bool run = false;
     bool fix_direction = false;
     double direction = 0.0;
-    std::vector<std::array<std::array<float,2>,4>> path;
+    std::vector<std::array<std::array<float, 2>, 4>> path;
 
 };
 constexpr auto PathConfig_properties = std::make_tuple(
@@ -566,38 +569,40 @@ constexpr auto PathConfig_properties = std::make_tuple(
 );
 
 
-void to_json(nlohmann::json& j, const PathConfig& object)
-{
+void to_json(nlohmann::json &j, const PathConfig &object) {
 
     constexpr auto nbProperties = std::tuple_size<decltype(PathConfig_properties)>::value;
     common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
         // get the property
-        auto& property = std::get<i>(PathConfig_properties);
+        auto &property = std::get<i>(PathConfig_properties);
         // set the value to the member
         j[property.name] = object.*(property.member);
     });
 }
 
-void from_json(const nlohmann::json& j, PathConfig& object) {
+void from_json(const nlohmann::json &j, PathConfig &object) {
 
     constexpr auto nbProperties = std::tuple_size<decltype(PathConfig_properties)>::value;
     common::for_sequence(std::make_index_sequence<nbProperties>{}, [&](auto i) {
         // get the property
-        auto& property = std::get<i>(PathConfig_properties);
+        auto &property = std::get<i>(PathConfig_properties);
         // set the value to the member
-        if(j.contains(property.name))
+        if (j.contains(property.name))
 //            object.*(property.member) = j[property.name];
             j.at(property.name).get_to(object.*(property.member));
-        else{
-            std::cerr << "from_json: key["<<property.name<<"] not exist"<< std::endl;
+        else {
+            std::cerr << "from_json: key[" << property.name << "] not exist" << std::endl;
         }
     });
 }
-namespace common{
-    struct Variable{
+
+namespace common {
+    struct Variable {
         bool value = false;
-        Variable(bool v): value(v){
+
+        Variable(bool v) : value(v) {
         }
+
         explicit operator bool() {
             bool v = value;
             return value = false, v;
@@ -606,11 +611,14 @@ namespace common{
 }
 
 
-int test_tec(int argc, char** argv) {
+int test_tec(int argc, char **argv) {
 
 
     std::atomic_bool program_run(true);
-    auto my_handler = common::fnptr<void(int)>([&](int sig){ std::cout << "get sig " << sig;program_run = false;});
+    auto my_handler = common::fnptr<void(int)>([&](int sig) {
+        std::cout << "get sig " << sig;
+        program_run = false;
+    });
     common::set_signal_handler(my_handler);
 
     plog::RollingFileAppender<plog::CsvFormatter> fileAppender("tec.csv", 20000000, 20); // Create the 1st appender.
@@ -660,80 +668,85 @@ int test_tec(int argc, char** argv) {
 
     int qos = 1;
 
+    int rotate_command_speed = 1000;
+
+    bool force_use_channel_0 = false;
+
     auto cli
-            =  lyra::exe_name(exe_name)
-               | lyra::help(get_help)
-               | lyra::opt( config_file, "config_file" )["-c"]["--config_file"]("config_file")
-               | lyra::opt( enable_control)["-e"]["--enable_control"]("enable_control")
-               | lyra::opt( log_to_file)["-l"]["--log_to_file"]("log_to_file")
-               | lyra::opt( log_level,"log_level")["-L"]["--log_level"]("log_level")
-                 | lyra::opt( qos,"qos")["-q"]["--qos"]("qos")
+            = lyra::exe_name(exe_name)
+              | lyra::help(get_help)
+              | lyra::opt(config_file, "config_file")["-c"]["--config_file"]("config_file")
+              | lyra::opt(enable_control)["-e"]["--enable_control"]("enable_control")
+              | lyra::opt(log_to_file)["-l"]["--log_to_file"]("log_to_file")
+              | lyra::opt(log_level, "log_level")["-L"]["--log_level"]("log_level")
+              | lyra::opt(qos, "qos")["-q"]["--qos"]("qos")
 
-               | lyra::opt( use_sim)["-S"]["--use_sim"]("use_sim")
-               | lyra::opt( use_dynamic_vel)["-d"]["--use_dynamic_vel"]("use_dynamic_vel")
-               | lyra::opt(smooth_stop,"smooth_stop")["-s"]["--smooth_stop"]("smooth_stop")
-//               | lyra::opt(use_rot_angle_abs,"use_rot_angle_abs")["-a"]["--abs_rot"]("use_rot_angle_abs")
-               | lyra::opt(cmd_vel_timeout_ms,"cmd_vel_timeout_ms")["-t"]["--cmdvel_timeout"]("cmd_vel_timeout_ms")
-               | lyra::opt(feedback_timeout_ms,"feedback_timeout_ms")["-f"]["--feedback_timeout"]("feedback_timeout_ms")
-               | lyra::opt(initialise_wait_s,"initialise_wait_s")["-i"]["--initialise_wait_s"]("initialise_wait_s")
-                 | lyra::opt(command_recovery_time_s,"command_recovery_time_s")["-r"]["--recovery_time_s"]("command_recovery_time_s")
-               | lyra::opt(mqtt_server,"mqtt_server")["-M"]["--mqtt_server"]("mqtt_server")
-               | lyra::opt(can_forward_file,"can_forward_file")["-T"]["--can_forward_file"]("can_forward_file")
-               | lyra::opt(planner_config_file,"planner_config_file")["-P"]["--planner_config_file"]("planner_config_file")
-                 | lyra::opt(path_config_file,"path_config_file")["-p"]["--path_config_file"]("path_config_file")
+              | lyra::opt(use_sim)["-S"]["--use_sim"]("use_sim")
+              | lyra::opt(use_dynamic_vel)["-d"]["--use_dynamic_vel"]("use_dynamic_vel")
+              | lyra::opt(smooth_stop, "smooth_stop")["-s"]["--smooth_stop"]("smooth_stop")
+              //               | lyra::opt(use_rot_angle_abs,"use_rot_angle_abs")["-a"]["--abs_rot"]("use_rot_angle_abs")
+              | lyra::opt(cmd_vel_timeout_ms, "cmd_vel_timeout_ms")["-t"]["--cmdvel_timeout"]("cmd_vel_timeout_ms")
+              | lyra::opt(feedback_timeout_ms, "feedback_timeout_ms")["-f"]["--feedback_timeout"]("feedback_timeout_ms")
+              | lyra::opt(initialise_wait_s, "initialise_wait_s")["-i"]["--initialise_wait_s"]("initialise_wait_s")
+              | lyra::opt(command_recovery_time_s, "command_recovery_time_s")["-r"]["--recovery_time_s"](
+                    "command_recovery_time_s")
+              | lyra::opt(mqtt_server, "mqtt_server")["-M"]["--mqtt_server"]("mqtt_server")
+              | lyra::opt(can_forward_file, "can_forward_file")["-T"]["--can_forward_file"]("can_forward_file")
+              | lyra::opt(planner_config_file, "planner_config_file")["-P"]["--planner_config_file"](
+                    "planner_config_file")
+              | lyra::opt(path_config_file, "path_config_file")["-p"]["--path_config_file"]("path_config_file")
 
-//               | lyra::opt(forward_vel_acc,"forward_vel_acc")["-F"]["--forward_vel_acc"]("forward_vel_acc")
-//               | lyra::opt(rotate_angle_vel,"rotate_angle_vel")["-R"]["--rotate_angle_vel"]("rotate_angle_vel")
+              | lyra::opt(force_use_channel_0)["-F"]["--force_use_channel_0"]("force_use_channel_0")
+              | lyra::opt(rotate_command_speed, "rotate_command_speed")["-R"]["--rotate_command_speed"](
+                    "rotate_command_speed")
 
-               //---
-             | lyra::opt( enable_fix_command)["-C"]["--command"]("enable_fix_command")
+              //---
+              | lyra::opt(enable_fix_command)["-C"]["--command"]("enable_fix_command")
 
-               //---
-               | lyra::arg(command, "command")("The command, and arguments, to attempt to run.")
-               ;
+              //---
+              | lyra::arg(command, "command")("The command, and arguments, to attempt to run.");
 
 
-    auto result = cli.parse( { argc, argv } );
-    if(get_help){
+    auto result = cli.parse({argc, argv});
+    if (get_help) {
         std::cout << cli << std::endl;
         return 0;
 
     }
 
 
-    if ( !result )
-    {
+    if (!result) {
         std::cerr << "Error in command line: " << result.message() << std::endl;
         return 0;
     }
 
-    if(log_to_file){
-        plog::init(plog::Severity(log_level), & consoleAppender).addAppender(&fileAppender); // Initialize the logger with the both appenders.
+    if (log_to_file) {
+        plog::init(plog::Severity(log_level), &consoleAppender).addAppender(
+                &fileAppender); // Initialize the logger with the both appenders.
 
-    }else{
-        plog::init(plog::Severity(log_level), & consoleAppender);//.addAppender(&fileAppender); // Initialize the logger with the both appenders.
+    } else {
+        plog::init(plog::Severity(log_level),
+                   &consoleAppender);//.addAppender(&fileAppender); // Initialize the logger with the both appenders.
     }
 
 
-
-    if(config_file.empty()){
+    if (config_file.empty()) {
         std::cout << "config_file not set" << std::endl;
         return 0;
 
     }
 
-    if(planner_config_file.empty()){
+    if (planner_config_file.empty()) {
         std::cout << "planner_config_file not set" << std::endl;
         return 0;
 
     }
 
 
-
     PLOGD << "enable_fix_command: " << enable_fix_command;
 
 
-    if(enable_fix_command &&command_array.size() !=4 ){
+    if (enable_fix_command && command_array.size() != 4) {
         std::cout << " enable_fix_command , command_array.size() = " << command_array.size() << std::endl;
         return 0;
 
@@ -747,33 +760,33 @@ int test_tec(int argc, char** argv) {
     std::vector<PathConfig> path_config;
 
 
-    if(!config_file.empty()){
+    if (!config_file.empty()) {
 
         std::ifstream ifs(config_file.c_str());
-        if(ifs.is_open()){
+        if (ifs.is_open()) {
 
-            try{
+            try {
                 nlohmann::json jf = nlohmann::json::parse(ifs);
 
-                std::cout << "config_file: " << config_file<< "\n jf :\n" << jf << std::endl;
+                std::cout << "config_file: " << config_file << "\n jf :\n" << jf << std::endl;
 
                 SteerConfigArray = jf;
-            }catch(nlohmann::detail::parse_error & e) {
+            } catch (nlohmann::detail::parse_error &e) {
 
                 std::cout << e.what() << std::endl;
-                std::cout << "json format error in config_file: " << config_file<<  std::endl;
+                std::cout << "json format error in config_file: " << config_file << std::endl;
 
                 return 0;
 
             }
 
 
-        }else{
+        } else {
             std::cout << "config_file not exist" << std::endl;
             return 0;
 
         }
-        if(SteerConfigArray.size() != CONTROLLER_NUM){
+        if (SteerConfigArray.size() != CONTROLLER_NUM) {
             std::cout << "config_file error: SteerConfigArray.size() = " << SteerConfigArray.size() << std::endl;
             return 0;
         }
@@ -781,46 +794,46 @@ int test_tec(int argc, char** argv) {
     }
 
 
-    if(!can_forward_file.empty()){
+    if (!can_forward_file.empty()) {
         std::ifstream ifs(can_forward_file.c_str());
-        if(ifs.is_open()){
-            try{
+        if (ifs.is_open()) {
+            try {
                 nlohmann::json jf = nlohmann::json::parse(ifs);
-                std::cout << "can_forward_file: " << can_forward_file<< "\n jf :\n" << jf << std::endl;
+                std::cout << "can_forward_file: " << can_forward_file << "\n jf :\n" << jf << std::endl;
                 CanForwardConfigArray = jf;
-            }catch(nlohmann::detail::parse_error & e) {
+            } catch (nlohmann::detail::parse_error &e) {
                 std::cout << e.what() << std::endl;
-                std::cout << "json format error in can_forward_file: " << can_forward_file<<  std::endl;
+                std::cout << "json format error in can_forward_file: " << can_forward_file << std::endl;
                 return 0;
             }
-        }else{
+        } else {
             std::cout << "can_forward_file not exist" << std::endl;
             return 0;
         }
     }
 
-    if(!path_config_file.empty()){
+    if (!path_config_file.empty()) {
         std::ifstream ifs(path_config_file.c_str());
-        if(ifs.is_open()){
-            try{
+        if (ifs.is_open()) {
+            try {
                 nlohmann::json jf = nlohmann::json::parse(ifs);
-                std::cout << "path_config_file: " << path_config_file<< "\n jf :\n" << jf << std::endl;
+                std::cout << "path_config_file: " << path_config_file << "\n jf :\n" << jf << std::endl;
                 path_config = jf;
-            }catch(nlohmann::detail::parse_error & e) {
+            } catch (nlohmann::detail::parse_error &e) {
                 std::cout << e.what() << std::endl;
-                std::cout << "json format error in path_config_file: " << path_config_file<<  std::endl;
+                std::cout << "json format error in path_config_file: " << path_config_file << std::endl;
                 return 0;
             }
-        }else{
+        } else {
             std::cout << "path_config_file not exist" << std::endl;
 
             path_config.resize(2);
-            for(auto& p: path_config){
+            for (auto &p: path_config) {
                 p.path.resize(8);
             }
 
             nlohmann::json j3 = path_config;
-            std::cout << "path_config:\n" << j3.dump(2)<< std::endl;
+            std::cout << "path_config:\n" << j3.dump(2) << std::endl;
 
 
             std::ofstream ofs(path_config_file.c_str());
@@ -831,19 +844,19 @@ int test_tec(int argc, char** argv) {
     }
 
 
-    if(!planner_config_file.empty()){
+    if (!planner_config_file.empty()) {
         std::ifstream ifs(planner_config_file.c_str());
-        if(ifs.is_open()){
-            try{
+        if (ifs.is_open()) {
+            try {
                 nlohmann::json jf = nlohmann::json::parse(ifs);
-                std::cout << "planner_config_file: " << planner_config_file<< "\n jf :\n" << jf << std::endl;
+                std::cout << "planner_config_file: " << planner_config_file << "\n jf :\n" << jf << std::endl;
                 planner_config = jf;
-            }catch(nlohmann::detail::parse_error & e) {
+            } catch (nlohmann::detail::parse_error &e) {
                 std::cout << e.what() << std::endl;
-                std::cout << "json format error in planner_config_file: " << planner_config_file<<  std::endl;
+                std::cout << "json format error in planner_config_file: " << planner_config_file << std::endl;
                 return 0;
             }
-        }else{
+        } else {
             std::cout << "planner_config_file not exist" << std::endl;
             return 0;
         }
@@ -855,44 +868,45 @@ int test_tec(int argc, char** argv) {
 
 
     int ARGC = extra_command.size();
-    const char *  ARGS[50];
-    for(int i = 0 ; i <ARGC;i++ ){
+    const char *ARGS[50];
+    for (int i = 0; i < ARGC; i++) {
         ARGS[i] = extra_command[i].data();
     }
 
-    const char** ARGS1 = const_cast<const char **>(ARGS);
+    const char **ARGS1 = const_cast<const char **>(ARGS);
 
 
     //mqtt
     std::cout << "run lua" << std::endl;
-    lua_State* L = luaL_newstate();
+    lua_State *L = luaL_newstate();
     sol::state_view lua(L);
-    lua.open_libraries(sol::lib::base, sol::lib::package,sol::lib::os, sol::lib::table, sol::lib::jit,sol::lib::coroutine);
-
+    lua.open_libraries(sol::lib::base, sol::lib::package, sol::lib::os, sol::lib::table, sol::lib::jit,
+                       sol::lib::coroutine);
 
 
     auto simple_handler_lambda =
-            [](lua_State*, const sol::protected_function_result& result) {
+            [](lua_State *, const sol::protected_function_result &result) {
                 // You can just pass it through to let the
                 // call-site handle it
                 std::cout << "\n******LUA INFO:\nAn exception occurred in a function, here's what it says ";
                 sol::error err = result;
-                std::cout << "call failed, sol::error::what() is " <<  err.what() << std::endl;
+                std::cout << "call failed, sol::error::what() is " << err.what() << std::endl;
 //                MLOGW("%s", what.c_str());
                 return result;
             };
-    lua.set_function("move_command",[&](float forward_vel_1, float  rotate_angle_1, float forward_vel_2, float  rotate_angle_2){
+    lua.set_function("move_command",
+                     [&](float forward_vel_1, float rotate_angle_1, float forward_vel_2, float rotate_angle_2) {
 
-        command_array.resize(4);
-        command_array[0] = forward_vel_1;
-        command_array[1] = rotate_angle_1;
-        command_array[2] = forward_vel_2;
-        command_array[3] = rotate_angle_2;
+                         command_array.resize(4);
+                         command_array[0] = forward_vel_1;
+                         command_array[1] = rotate_angle_1;
+                         command_array[2] = forward_vel_2;
+                         command_array[3] = rotate_angle_2;
 
-        command_array[1] = std::max(std::min(1.918888889f, command_array[1]),-1.918888889f);
-        command_array[3] = std::max(std::min(1.918888889f, command_array[3]),-1.918888889f);
+                         command_array[1] = std::max(std::min(1.918888889f, command_array[1]), -1.918888889f);
+                         command_array[3] = std::max(std::min(1.918888889f, command_array[3]), -1.918888889f);
 
-    });
+                     });
 
 
     std::string mqtt_server_str = absl::StrFormat("server:%s", mqtt_server.c_str());
@@ -901,13 +915,13 @@ int test_tec(int argc, char** argv) {
 
 //    char* mqtt_config_str[] = {"server:broker-cn.emqx.io", "port:1883","keep_alive:30","clean_session:1"};
 //    char* mqtt_config_str[] = {"server:172.30.254.199", "port:1883","keep_alive:30","clean_session:1"};
-    const char* mqtt_config_str[] = {mqtt_server_str.c_str(), "port:1883","keep_alive:30","clean_session:1"};
+    const char *mqtt_config_str[] = {mqtt_server_str.c_str(), "port:1883", "keep_alive:30", "clean_session:1"};
 
     message::MqttMessageManager mqttMessageManager;
-    char* mqtt_client_id = "cpp_test";
-    mqttMessageManager.open(mqtt_client_id,4, mqtt_config_str);
+    char *mqtt_client_id = "cpp_test";
+    mqttMessageManager.open(mqtt_client_id, 4, mqtt_config_str);
 //    char topic_arg[100];
-    std::string mqtt_pub_topic_arg = absl::StrFormat("PUB:%s:%i", mqtt_pub_topic.c_str(),qos);
+    std::string mqtt_pub_topic_arg = absl::StrFormat("PUB:%s:%i", mqtt_pub_topic.c_str(), qos);
     std::string mqtt_sub_topic_arg = absl::StrFormat("SUB:%s:0", mqtt_sub_topic.c_str());
 
     mqttMessageManager.add_channel<std::string>(mqtt_pub_topic_arg.c_str());
@@ -915,15 +929,14 @@ int test_tec(int argc, char** argv) {
     mqttMessageManager.add_channel<std::string>(mqtt_sub_topic_arg.c_str());
 
 
-
     std::string decode_str;
-    auto lua_cb =[&](void* data){
-        std::string* data_ptr = static_cast<std::string*>(data);
+    auto lua_cb = [&](void *data) {
+        std::string *data_ptr = static_cast<std::string *>(data);
         std::cout << "test123 recv msg: " << *data_ptr << std::endl;
-        bool decode_ok =  absl::Base64Unescape(*data_ptr,&decode_str);
+        bool decode_ok = absl::Base64Unescape(*data_ptr, &decode_str);
         std::cout << "test123 recv decode_str: " << decode_str << std::endl;
 
-        if(decode_ok){
+        if (decode_ok) {
 
             auto result = lua.script(
                     decode_str,
@@ -931,12 +944,10 @@ int test_tec(int argc, char** argv) {
             if (result.valid()) {
                 std::cout << "run lua script ok"
                           << std::endl;
-            }
-            else {
+            } else {
                 std::cout << "run lua script fail"
                           << std::endl;
             }
-
 
 
         }
@@ -946,13 +957,13 @@ int test_tec(int argc, char** argv) {
 
     std::cout << "mqtt start done" << std::endl;
 
-    const int STATUS_NUM = 14;
+    const int STATUS_NUM = 17;
     const int FRAME_NUM = 60;
 
     common::Time record_start_time = common::FromUnixNow();
     int mqtt_msg_status_cnt = 0;
-    std::vector<float> mqtt_msg_status(STATUS_NUM*FRAME_NUM);
-    std::vector<int16_t> mqtt_msg_status_int(STATUS_NUM*FRAME_NUM);
+    std::vector<float> mqtt_msg_status(STATUS_NUM * FRAME_NUM);
+    std::vector<int16_t> mqtt_msg_status_int(STATUS_NUM * FRAME_NUM);
 
     std::string mqtt_binary_str;
     std::string mqtt_base64_str;
@@ -965,7 +976,7 @@ int test_tec(int argc, char** argv) {
 
     message::RosMessageManager rosMessageManager;
 
-    rosMessageManager.open("driver_comm", ARGC, ARGS1 );
+    rosMessageManager.open("driver_comm", ARGC, ARGS1);
 
 
     rosMessageManager.add_channel<common_message::Twist>("SUB:control_cmd_vel:10");
@@ -982,7 +993,6 @@ int test_tec(int argc, char** argv) {
     rosMessageManager.add_channel<common_message::Odometry>("PPUB:stable_pose:200");
     rosMessageManager.add_channel<common_message::HeaderString>("PPUB:status:200");
     rosMessageManager.add_channel<std::vector<uint16_t >>("PPUB:error_code:200");
-
 
 
     std::vector<common_message::Twist> cmd_vel_msgs(10);
@@ -1032,9 +1042,9 @@ int test_tec(int argc, char** argv) {
     bool driver_action_timeout = false;
 
     common::Variable driver_init_command = false;
-    std::vector<uint16_t > driver_error_code(4,0);
+    std::vector<uint16_t> driver_error_code(4, 0);
 
-    std::vector<uint16_t > driver_error_code_template(19);
+    std::vector<uint16_t> driver_error_code_template(19);
     driver_error_code_template[0] = 0x0001;
     driver_error_code_template[1] = 0x0002;
     driver_error_code_template[2] = 0x0004;
@@ -1061,30 +1071,29 @@ int test_tec(int argc, char** argv) {
     driver_error_code_template[18] = 0x8005;
 
 
-
-
-    if(!path_config.empty()){
-        std::vector<std::array<float,2>>  path;
+    if (!path_config.empty()) {
+        std::vector<std::array<float, 2>> path;
         float step = 0.1;
         common_message::PoseStamped pose;
 
-        for(auto& P : path_config){
-            if (P.run){
+        for (auto &P: path_config) {
+            if (P.run) {
 
-                transform::toQuaternion(pose.pose.orientation.w,pose.pose.orientation.x,pose.pose.orientation.y,pose.pose.orientation.z, P.direction);
+                transform::toQuaternion(pose.pose.orientation.w, pose.pose.orientation.x, pose.pose.orientation.y,
+                                        pose.pose.orientation.z, P.direction);
 
                 auto &p1 = P.path;
-                for(auto & p2:p1){
+                for (auto &p2: p1) {
 
-                    float PA[2] = {p2[0][0],p2[0][1]};
-                    float PB[2] = {p2[1][0],p2[1][1]};
-                    float PC[2] = {p2[2][0],p2[2][1]};
-                    float PD[2] = {p2[3][0],p2[3][1]};
-                    math::buildBezier(PA, PB,PC, PD, step,path);
+                    float PA[2] = {p2[0][0], p2[0][1]};
+                    float PB[2] = {p2[1][0], p2[1][1]};
+                    float PC[2] = {p2[2][0], p2[2][1]};
+                    float PD[2] = {p2[3][0], p2[3][1]};
+                    math::buildBezier(PA, PB, PC, PD, step, path);
                     size_t last_len = planner_global_path.poses.size();
-                    planner_global_path.poses.resize(last_len + path.size(),pose);
+                    planner_global_path.poses.resize(last_len + path.size(), pose);
 
-                    for(size_t i = 0 ; i < path.size();i++){
+                    for (size_t i = 0; i < path.size(); i++) {
                         planner_global_path.poses[last_len + i].pose.position.x = path[i][0];
                         planner_global_path.poses[last_len + i].pose.position.y = path[i][1];
                     }
@@ -1107,15 +1116,14 @@ int test_tec(int argc, char** argv) {
     float dynamic_rotate_vel = 0.0;
 
     common_message::Twist recv_cmd_vel_msg;
-    common::Time  recv_cmd_vel_time = common::FromUnixNow();
-    auto cmd_vel_sub_cb =[&recv_new_cmd_vel,&recv_cmd_vel_msg,&recv_cmd_vel_time](void* data){
-        common_message::Twist * data_ptr = static_cast<common_message::Twist*>(data);
-        recv_cmd_vel_msg = * data_ptr;
+    common::Time recv_cmd_vel_time = common::FromUnixNow();
+    auto cmd_vel_sub_cb = [&recv_new_cmd_vel, &recv_cmd_vel_msg, &recv_cmd_vel_time](void *data) {
+        common_message::Twist *data_ptr = static_cast<common_message::Twist *>(data);
+        recv_cmd_vel_msg = *data_ptr;
 //        std::cout << "odom_sub_cb recv msg: " << data_ptr->linear.x << ", " << data_ptr->angular.z << std::endl;
         recv_cmd_vel_time = common::FromUnixNow();
         recv_new_cmd_vel = true;
     };
-
 
 
     control::DoubleSteerMotionPlanner motion_planner;
@@ -1126,15 +1134,16 @@ int test_tec(int argc, char** argv) {
     // stop/cancel : path size = 0
     // velocity constrains: ros param or embed in frame_id string
     // ros
-    auto planner_path_sub_cb = [&recv_cmd_vel_msg, &motion_planner,&motion_planner_error](void* data){
-        if(motion_planner_error){
+    auto planner_path_sub_cb = [&recv_cmd_vel_msg, &motion_planner, &motion_planner_error](void *data) {
+        if (motion_planner_error) {
             return;
         }
-        common_message::Path * data_ptr = static_cast<common_message::Path*>(data);
+        common_message::Path *data_ptr = static_cast<common_message::Path *>(data);
 
         motion_planner.requestPath(*data_ptr);
 
-        { recv_cmd_vel_msg.linear.x = 0.0;
+        {
+            recv_cmd_vel_msg.linear.x = 0.0;
             recv_cmd_vel_msg.linear.y = 0.0;
             recv_cmd_vel_msg.angular.z = 0.0;
         }
@@ -1143,32 +1152,34 @@ int test_tec(int argc, char** argv) {
 
 
     // goal callbak
-    auto planner_goal_sub_cb = [&driver_init_command, &recv_cmd_vel_msg, &motion_planner,&motion_planner_error](void* data){
-        common_message::PoseStamped * data_ptr = static_cast<common_message::PoseStamped*>(data);
+    auto planner_goal_sub_cb = [&driver_init_command, &recv_cmd_vel_msg, &motion_planner, &motion_planner_error](
+            void *data) {
+        common_message::PoseStamped *data_ptr = static_cast<common_message::PoseStamped *>(data);
         {
             recv_cmd_vel_msg.linear.x = 0.0;
             recv_cmd_vel_msg.linear.y = 0.0;
             recv_cmd_vel_msg.angular.z = 0.0;
         }
 
-        if(data_ptr->header.frame_id == "reset"){
+        if (data_ptr->header.frame_id == "reset") {
             motion_planner.reset();
             driver_init_command = true;
-            return ;
+            return;
         }
-        if(motion_planner_error){
+        if (motion_planner_error) {
             return;
         }
         motion_planner.requestGoal(*data_ptr);
 
 
     };
-    auto planner_config_sub_cb = [&motion_planner](void* data){
-        common_message::HeaderString * data_ptr = static_cast<common_message::HeaderString*>(data);
+    auto planner_config_sub_cb = [&motion_planner](void *data) {
+        common_message::HeaderString *data_ptr = static_cast<common_message::HeaderString *>(data);
         control::PlannerConfig config = motion_planner.m_planner_config;
-        if(!data_ptr->data.empty() && (motion_planner.m_task_state == control::MotionPlanner::TaskState::idle || motion_planner.m_task_state == control::MotionPlanner::TaskState::finished) ){
+        if (!data_ptr->data.empty() && (motion_planner.m_task_state == control::MotionPlanner::TaskState::idle ||
+                                        motion_planner.m_task_state == control::MotionPlanner::TaskState::finished)) {
             nlohmann::json j = nlohmann::json::parse(data_ptr->data);
-            from_json(j,config);
+            from_json(j, config);
             motion_planner.m_planner_config = config;
         }
     };
@@ -1221,12 +1232,23 @@ int test_tec(int argc, char** argv) {
     std::vector<kaco::Message> message_buffer(MAX_MESSAGE_SIZE);
 
 
-    auto send_to_channel_1 = [&](const auto& msg){
-        device.send(msg,0);
+    auto send_to_channel_1 = [&](const auto &msg) {
+
+        int channel = 0;
+        if (force_use_channel_0) {
+            channel = 0;
+        }
+
+        device.send(msg, channel);
         return 1;
     };
-    auto send_to_channel_2 = [&](const auto& msg){
-        device.send(msg,1);
+    auto send_to_channel_2 = [&](const auto &msg) {
+        int channel = 1;
+        if (force_use_channel_0) {
+            channel = 0;
+        }
+
+        device.send(msg, channel);
         return 1;
     };
 
@@ -1236,115 +1258,150 @@ int test_tec(int argc, char** argv) {
     std::vector<kaco::NMT::NodeState> device_node_state_array(DEVICE_NUM + 1);
     std::vector<std::bitset<16>> device_node_emcy_array(DEVICE_NUM + 1);
 
+    // initialise and enable
     std::vector<kaco::Message> forward_driver_initializer_msg(4);
-    std::vector<kaco::Message> rotate_driver_initializer_msg(4);
+    std::vector<kaco::Message> rotate_driver_initializer_msg(5);
 
+    // disable
     std::vector<kaco::Message> forward_driver_disable_msg(1);
     std::vector<kaco::Message> rotate_driver_disable_msg(1);
 
-    std::vector<kaco::Message> driver_command_msg_channel_1(2);
-    std::vector<kaco::Message> driver_command_msg_channel_2(2);
+    // command and node guard
+    std::vector<kaco::Message> driver_command_msg_channel_1(5);
+    std::vector<kaco::Message> driver_command_msg_channel_2(5);
 
     std::vector<kaco::Message> driver_node_guard_msg(1);
     std::vector<kaco::Message> forward_driver_reset_msg(1);
     std::vector<kaco::Message> rotate_driver_reset_msg(1);
 
 
-    driver_node_guard_msg[0] = kaco::Message{0x700,true,false,0,{0x00,0x00,0x00,0,0,0,0,0}};
-    forward_driver_reset_msg[0] = kaco::Message{0x200,false,false,3,{0x80,0x00,0x03,0,0,0,0,0}};
-    rotate_driver_reset_msg[0] = kaco::Message{0x200,false,false,3,{0x80,0x00,0x01,0,0,0,0,0}};
+    driver_node_guard_msg[0] = kaco::Message{0x700, true, false, 0, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
+    forward_driver_reset_msg[0] = kaco::Message{0x200, false, false, 3, {0x80, 0x00, 0x03, 0, 0, 0, 0, 0}};
+    rotate_driver_reset_msg[0] = kaco::Message{0x200, false, false, 3, {0x80, 0x00, 0x01, 0, 0, 0, 0, 0}};
 
-    forward_driver_disable_msg[0] = kaco::Message{0x200,false,false,8,{0x06,0x00,0x03,0,0,0,0,0}};
-    rotate_driver_disable_msg[0] = kaco::Message{0x200,false,false,8,{0x06,0x00,0x08,0,0,0,0,0}};
+    forward_driver_disable_msg[0] = kaco::Message{0x200, false, false, 3, {0x06, 0x00, 0x03, 0, 0, 0, 0, 0}};
+    rotate_driver_disable_msg[0] = kaco::Message{0x200, false, false, 3, {0x06, 0x00, 0x01, 0, 0, 0, 0, 0}};
 
-    forward_driver_initializer_msg[0] = kaco::Message{0x00,false,false,2,{0x01,0x00,0x00,0,0,0,0,0}};
-    forward_driver_initializer_msg[1] = kaco::Message{0x200,false,false,8,{0x06,0x00,0x03,0,0,0,0,0}};
-    forward_driver_initializer_msg[2] = kaco::Message{0x200,false,false,8,{0x07,0x00,0x03,0,0,0,0,0}};
-    forward_driver_initializer_msg[3] = kaco::Message{0x200,false,false,8,{0x0f,0x00,0x03,0,0,0,0,0}};
+    forward_driver_initializer_msg[0] = kaco::Message{0x00, false, false, 2, {0x01, 0x00, 0x00, 0, 0, 0, 0, 0}};
+    forward_driver_initializer_msg[1] = kaco::Message{0x200, false, false, 3, {0x06, 0x00, 0x03, 0, 0, 0, 0, 0}};
+    forward_driver_initializer_msg[2] = kaco::Message{0x200, false, false, 3, {0x07, 0x00, 0x03, 0, 0, 0, 0, 0}};
+    forward_driver_initializer_msg[3] = kaco::Message{0x200, false, false, 3, {0x0f, 0x00, 0x03, 0, 0, 0, 0, 0}};
 
-    rotate_driver_initializer_msg[0] = kaco::Message{0x00,false,false,2,{0x01,0x00,0x00,0,0,0,0,0}};
-    rotate_driver_initializer_msg[1] = kaco::Message{0x200,false,false,8,{0x06,0x00,0x08,0,0,0,0,0}};
-    rotate_driver_initializer_msg[2] = kaco::Message{0x200,false,false,8,{0x07,0x00,0x08,0,0,0,0,0}};
-    rotate_driver_initializer_msg[3] = kaco::Message{0x200,false,false,8,{0x0f,0x00,0x08,0,0,0,0,0}};
+    rotate_driver_initializer_msg[0] = kaco::Message{0x00, false, false, 2, {0x01, 0x00, 0x00, 0, 0, 0, 0, 0}};
+    rotate_driver_initializer_msg[1] = kaco::Message{0x200, false, false, 3, {0x06, 0x00, 0x01, 0, 0, 0, 0, 0}};
+    rotate_driver_initializer_msg[2] = kaco::Message{0x200, false, false, 3, {0x07, 0x00, 0x01, 0, 0, 0, 0, 0}};
+    rotate_driver_initializer_msg[3] = kaco::Message{0x200, false, false, 3, {0x0f, 0x00, 0x01, 0, 0, 0, 0, 0}};
+    rotate_driver_initializer_msg[4] = kaco::Message{0x200, false, false, 3, {0x3f, 0x00, 0x01, 0, 0, 0, 0, 0}};
 
-    driver_command_msg_channel_1[0] =kaco::Message{0x301,false,false,8,{0x00,0x00,0x00,0,0,0,0,0}};
-    driver_command_msg_channel_1[1] =kaco::Message{0x302,false,false,8,{0x00,0x00,0x00,0,0,0,0,0}};
-    driver_command_msg_channel_2[0] =kaco::Message{0x304,false,false,8,{0x00,0x00,0x00,0,0,0,0,0}};
-    driver_command_msg_channel_2[1] =kaco::Message{0x305,false,false,8,{0x00,0x00,0x00,0,0,0,0,0}};
+    driver_command_msg_channel_1[0] = kaco::Message{0x401, false, false, 4, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
+    driver_command_msg_channel_1[1] = kaco::Message{0x302, false, false, 8, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
+    driver_command_msg_channel_1[2] = kaco::Message{0x202, false, false, 3, {0x3f, 0x00, 0x01, 0, 0, 0, 0, 0}};
+    driver_command_msg_channel_1[3] = kaco::Message{0x701, true, false, 0, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
+    driver_command_msg_channel_1[4] = kaco::Message{0x702, true, false, 0, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
 
-    auto initialise_forward_driver = [&](size_t driver_id){
+    driver_command_msg_channel_2[0] = kaco::Message{0x403, false, false, 4, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
+    driver_command_msg_channel_2[1] = kaco::Message{0x304, false, false, 8, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
+    driver_command_msg_channel_2[2] = kaco::Message{0x204, false, false, 3, {0x3f, 0x00, 0x01, 0, 0, 0, 0, 0}};
+    driver_command_msg_channel_2[3] = kaco::Message{0x703, true, false, 0, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
+    driver_command_msg_channel_2[4] = kaco::Message{0x704, true, false, 0, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
+
+    auto initialise_forward_driver = [&](size_t driver_id) {
         PLOGD << "initialise_forward_driver: " << driver_id;
 
-        if(forward_driver_initializer_msg.empty()){
-            return ;
+        if (forward_driver_initializer_msg.empty()) {
+            return;
         }
         forward_driver_initializer_msg[0].data[1] = driver_id;
 
-        for(size_t i = 1; i < forward_driver_initializer_msg.size();i++){
+        for (size_t i = 1; i < forward_driver_initializer_msg.size(); i++) {
 
             forward_driver_initializer_msg[i].cob_id = 0x200 + driver_id;
         }
         int channel = (driver_id <= 2) ? 0 : 1;
-        device.send(forward_driver_initializer_msg.data(),forward_driver_initializer_msg.size(),channel);
+
+        if (force_use_channel_0) {
+            channel = 0;
+        }
+        device.send(forward_driver_initializer_msg.data(), forward_driver_initializer_msg.size(), channel);
     };
 
-    auto initialise_rotate_driver = [&](size_t driver_id){
+    auto initialise_rotate_driver = [&](size_t driver_id) {
 
         PLOGD << "initialise_rotate_driver: " << driver_id;
-        if(rotate_driver_initializer_msg.empty()){
-            return ;
+        if (rotate_driver_initializer_msg.empty()) {
+            return;
         }
         rotate_driver_initializer_msg[0].data[1] = driver_id;
 
-        for(size_t i = 1; i < rotate_driver_initializer_msg.size();i++){
+        for (size_t i = 1; i < rotate_driver_initializer_msg.size(); i++) {
 
             rotate_driver_initializer_msg[i].cob_id = 0x200 + driver_id;
         }
         int channel = (driver_id <= 2) ? 0 : 1;
-        device.send(rotate_driver_initializer_msg.data(),rotate_driver_initializer_msg.size(),channel);
+
+        if (force_use_channel_0) {
+            channel = 0;
+        }
+
+        device.send(rotate_driver_initializer_msg.data(), rotate_driver_initializer_msg.size(), channel);
     };
 
-    auto disable_forward_driver = [&](size_t driver_id){
-        for(auto& m:forward_driver_disable_msg){
+    auto disable_forward_driver = [&](size_t driver_id) {
+        for (auto &m: forward_driver_disable_msg) {
             m.cob_id = 0x200 + driver_id;
         }
         int channel = (driver_id <= 2) ? 0 : 1;
-        device.send(forward_driver_disable_msg.data(),forward_driver_disable_msg.size(),channel);
+        if (force_use_channel_0) {
+            channel = 0;
+        }
+        device.send(forward_driver_disable_msg.data(), forward_driver_disable_msg.size(), channel);
 
     };
 
-    auto disable_rotate_driver = [&](size_t driver_id){
-        for(auto& m:rotate_driver_disable_msg){
+    auto disable_rotate_driver = [&](size_t driver_id) {
+        for (auto &m: rotate_driver_disable_msg) {
             m.cob_id = 0x200 + driver_id;
         }
         int channel = (driver_id <= 2) ? 0 : 1;
-        device.send(rotate_driver_disable_msg.data(),rotate_driver_disable_msg.size(),channel);
+        if (force_use_channel_0) {
+            channel = 0;
+        }
+        device.send(rotate_driver_disable_msg.data(), rotate_driver_disable_msg.size(), channel);
 
     };
 
-    auto send_node_guard = [&](size_t driver_id){
-        auto& msg = driver_node_guard_msg;
-        for(auto& m:msg){
+    auto send_node_guard = [&](size_t driver_id) {
+        auto &msg = driver_node_guard_msg;
+        for (auto &m: msg) {
             m.cob_id = 0x700 + driver_id;
         }
         int channel = (driver_id <= 2) ? 0 : 1;
-        device.send(msg.data(),msg.size(),channel);
+        if (force_use_channel_0) {
+            channel = 0;
+        }
+        device.send(msg.data(), msg.size(), channel);
     };
-    auto reset_forward_driver= [&](size_t driver_id){
-        auto& msg = forward_driver_reset_msg;
-        for(auto& m:msg){
+    auto reset_forward_driver = [&](size_t driver_id) {
+        auto &msg = forward_driver_reset_msg;
+        for (auto &m: msg) {
             m.cob_id = 0x200 + driver_id;
         }
         int channel = (driver_id <= 2) ? 0 : 1;
-        device.send(msg.data(),msg.size(),channel);
+        if (force_use_channel_0) {
+            channel = 0;
+        }
+        device.send(msg.data(), msg.size(), channel);
     };
-    auto reset_rotate_driver= [&](size_t driver_id){
-        auto& msg = rotate_driver_reset_msg;
-        for(auto& m:msg){
+    auto reset_rotate_driver = [&](size_t driver_id) {
+        auto &msg = rotate_driver_reset_msg;
+        for (auto &m: msg) {
             m.cob_id = 0x200 + driver_id;
         }
         int channel = (driver_id <= 2) ? 0 : 1;
-        device.send(msg.data(),msg.size(),channel);
+        if (force_use_channel_0) {
+            channel = 0;
+        }
+        device.send(msg.data(), msg.size(), channel);
     };
 
     bool is_all_alive = false;
@@ -1364,26 +1421,26 @@ int test_tec(int argc, char** argv) {
 
     bool is_planner_running = false;
 
-    auto node_heartbeat_cb = [&](const kaco::Message& message, const kaco::NMT::NodeState & state){
+    auto node_heartbeat_cb = [&](const kaco::Message &message, const kaco::NMT::NodeState &state) {
 
         PLOGD << "node_heartbeat : " << int(message.get_node_id()) << ", state: " << int(state);
-        if(message.get_node_id() > 0 && message.get_node_id() <= DEVICE_NUM){
+        if (message.get_node_id() > 0 && message.get_node_id() <= DEVICE_NUM) {
             device_node_state_array[message.get_node_id()] = state;
         }
     };
 
-    auto node_emcy_cb = [&](const kaco::Message& message){
-        if(message.get_node_id() > 0 && message.get_node_id() <= DEVICE_NUM){
-            device_node_emcy_array[message.get_node_id()] =  * (u_int64_t *)(&message.data[3]);
+    auto node_emcy_cb = [&](const kaco::Message &message) {
+        if (message.get_node_id() > 0 && message.get_node_id() <= DEVICE_NUM) {
+            device_node_emcy_array[message.get_node_id()] = *(u_int64_t *) (&message.data[3]);
         }
     };
-
-    auto check_all_state = [&](){
+    std::array<size_t, 4> driver_id_vec{1, 2, 3, 4};
+    auto check_all_state = [&]() {
 
         is_all_alive = true;
-        std::array<size_t, 4> driver_id_vec{1,2,4,5};
-        for(auto i : driver_id_vec){
-            is_all_alive = is_all_alive &&  (device_node_state_array[i] == kaco::NMT::NodeState::Pre_operational || device_node_state_array[i] == kaco::NMT::NodeState::Operational );
+        for (auto i: driver_id_vec) {
+            is_all_alive = is_all_alive && (device_node_state_array[i] == kaco::NMT::NodeState::Pre_operational ||
+                                            device_node_state_array[i] == kaco::NMT::NodeState::Operational);
         }
 
     };
@@ -1395,80 +1452,109 @@ int test_tec(int argc, char** argv) {
     bool is_stop_command_existed = false;
     bool is_enable_command_existed = false;
 
-    auto control_wheel = [&](bool enable,bool stop,  float forward_vel_1, float rotate_angle_1, float forward_vel_2, float rotate_angle_2){
+    auto control_wheel = [&](bool enable, bool stop, float forward_vel_1, float rotate_angle_1, float forward_vel_2,
+                             float rotate_angle_2) {
 
 
-        if(!enable_control || use_sim){
+        if (!enable_control || use_sim) {
             PLOGD << "enable_control is not set, or use_sim is set";
-            return ;
+            return;
         }
-        if(!is_all_alive || !is_all_initialised){
+        if (!is_all_alive || !is_all_initialised) {
             PLOGD << "not is_all_alive or not is_all_initialised";
+            send_node_guard(1);
+            send_node_guard(2);
+            send_node_guard(3);
+            send_node_guard(4);
             return;
         }
 
-        PLOGD <<"control_wheel :[enable]: " <<enable;
+        PLOGD << "control_wheel :[enable]: " << enable;
 
 
+        if (enable) {
 
-        if(enable){
+            std::cout << "control_wheel 1:[forward_vel, rotate_angle]: " << forward_vel_1 << ", " << rotate_angle_1
+                      << std::endl;
+            std::cout << "control_wheel 2:[forward_vel, rotate_angle]: " << forward_vel_2 << ", " << rotate_angle_2
+                      << std::endl;
 
-            PLOGD <<"control_wheel 1:[forward_vel, rotate_angle]: " << forward_vel_1 << ", " << rotate_angle_1;
-            PLOGD <<"control_wheel 2:[forward_vel, rotate_angle]: " << forward_vel_2 << ", " << rotate_angle_2;
+            PLOGD << "SteerConfigArray[0].use_rot_angle_abs: " << SteerConfigArray[0].use_rot_angle_abs;
+            PLOGD << "SteerConfigArray[1].use_rot_angle_abs: " << SteerConfigArray[1].use_rot_angle_abs;
 
-            PLOGD <<"SteerConfigArray[0].use_rot_angle_abs: " << SteerConfigArray[0].use_rot_angle_abs;
-            PLOGD <<"SteerConfigArray[1].use_rot_angle_abs: " << SteerConfigArray[1].use_rot_angle_abs;
-
-            PLOGD <<"SteerConfigArray[0].rot_angle_abs_offset: " << SteerConfigArray[0].rot_angle_abs_offset;
-            PLOGD <<"SteerConfigArray[1].rot_angle_abs_offset: " << SteerConfigArray[1].rot_angle_abs_offset;
+            PLOGD << "SteerConfigArray[0].rot_angle_abs_offset: " << SteerConfigArray[0].rot_angle_abs_offset;
+            PLOGD << "SteerConfigArray[1].rot_angle_abs_offset: " << SteerConfigArray[1].rot_angle_abs_offset;
 
 
-            *(int*)(&driver_command_msg_channel_1[0].data[0]) = static_cast<int>(forward_vel_1 / SteerConfigArray[0].forward_speed_k);
-            *(int*)(&driver_command_msg_channel_1[1].data[0]) = static_cast<int>((rotate_angle_1 - SteerConfigArray[0].rot_angle_b - SteerConfigArray[0].rot_angle_abs_offset)/SteerConfigArray[0].rot_angle_k);
-            *(int*)(&driver_command_msg_channel_2[0].data[0]) = static_cast<int>(forward_vel_2 / SteerConfigArray[1].forward_speed_k);
-            *(int*)(&driver_command_msg_channel_2[1].data[0]) = static_cast<int>((rotate_angle_2 - SteerConfigArray[1].rot_angle_b - SteerConfigArray[1].rot_angle_abs_offset)/SteerConfigArray[1].rot_angle_k);
-#if 0
-            PLOGD << "send can data to channel 1";
+            *(int *) (&driver_command_msg_channel_1[0].data[0]) = static_cast<int>(forward_vel_1 /
+                                                                                   SteerConfigArray[0].forward_speed_k);
+            *(int *) (&driver_command_msg_channel_1[1].data[0]) = static_cast<int>(
+                    (rotate_angle_1 - SteerConfigArray[0].rot_angle_b - SteerConfigArray[0].rot_angle_abs_offset) /
+                    SteerConfigArray[0].rot_angle_k);
+            *(int *) (&driver_command_msg_channel_1[1].data[4]) = rotate_command_speed;
+
+            *(int *) (&driver_command_msg_channel_2[0].data[0]) = static_cast<int>(forward_vel_2 /
+                                                                                   SteerConfigArray[1].forward_speed_k);
+            *(int *) (&driver_command_msg_channel_2[1].data[0]) = static_cast<int>(
+                    (rotate_angle_2 - SteerConfigArray[1].rot_angle_b - SteerConfigArray[1].rot_angle_abs_offset) /
+                    SteerConfigArray[1].rot_angle_k);
+            *(int *) (&driver_command_msg_channel_2[1].data[4]) = rotate_command_speed;
+
+#if 1
+            std::cout << "send can data to channel 1";
             driver_command_msg_channel_1[0].print();
             driver_command_msg_channel_1[1].print();
 
 
-            PLOGD << "send can data to channel 2";
+            std::cout << "send can data to channel 2";
             driver_command_msg_channel_2[0].print();
             driver_command_msg_channel_2[1].print();
 #endif
 
-            device.send(driver_command_msg_channel_1.data(),driver_command_msg_channel_1.size(),0);
-            device.send(driver_command_msg_channel_2.data(),driver_command_msg_channel_2.size(),1);
+            int channel = 0;
+            if (force_use_channel_0) {
+                channel = 0;
+            }
 
-            if(stop){
+            device.send(driver_command_msg_channel_1.data(), driver_command_msg_channel_1.size(), channel);
+
+            channel = 1;
+            if (force_use_channel_0) {
+                channel = 0;
+            }
+            device.send(driver_command_msg_channel_2.data(), driver_command_msg_channel_2.size(), channel);
+
+            if (stop) {
                 disable_forward_driver(1);
-                disable_forward_driver(4);
-            }else {
+                disable_forward_driver(3);
+            } else {
 
 
-                if(!is_enable_command_existed){
-                    initialise_rotate_driver(2);
-                    initialise_rotate_driver(5);
+                if (!is_enable_command_existed) {
                     initialise_forward_driver(1);
-                    initialise_forward_driver(4);
+                    initialise_rotate_driver(2);
+                    initialise_forward_driver(3);
+                    initialise_rotate_driver(4);
 
                 }
-                if(is_stop_command_existed){
+                if (is_stop_command_existed) {
                     initialise_forward_driver(1);
-                    initialise_forward_driver(4);
+                    initialise_forward_driver(3);
                 }
             }
 
 
-
-
-        }else{
+        } else {
             disable_forward_driver(1);
             disable_rotate_driver(2);
 
-            disable_forward_driver(4);
-            disable_rotate_driver(5);
+            disable_forward_driver(3);
+            disable_rotate_driver(4);
+
+            send_node_guard(1);
+            send_node_guard(2);
+            send_node_guard(3);
+            send_node_guard(4);
 
         }
 
@@ -1478,13 +1564,13 @@ int test_tec(int argc, char** argv) {
     };
 
     bool state_update = false;
-    auto update_wheel_forward = [&](size_t driver_id, const kaco::Message& message){
+    auto update_wheel_forward = [&](size_t driver_id, const kaco::Message &message) {
 
         PLOGD << "receive [" << driver_id << "]";
 
-        int num = * (int*)(&message.data[0]);
+        int num = *(int *) (&message.data[0]);
 
-        std::bitset<16> fault_code = * (int*)(&message.data[4]);
+        std::bitset<16> fault_code = *(int *) (&message.data[4]);
 
         SteerConfigArray[driver_id].actual_forward_vel = num * SteerConfigArray[driver_id].forward_speed_k;
         state_update = true;
@@ -1492,14 +1578,17 @@ int test_tec(int argc, char** argv) {
         SteerConfigArray[driver_id].forward_time = common::FromUnixNow();
 
         //error code
-        uint16_t current_code =  * (uint16_t *)(&message.data[4]);
-        auto& code =  driver_error_code[driver_id*2 + 0];
+        uint16_t current_code = *(uint16_t *) (&message.data[4]);
+        auto &code = driver_error_code[driver_id * 2 + 0];
 
-        bool is_fault_last = (std::find(driver_error_code_template.begin(), driver_error_code_template.end(), code) != driver_error_code_template.end());
+        bool is_fault_last = (std::find(driver_error_code_template.begin(), driver_error_code_template.end(), code) !=
+                              driver_error_code_template.end());
 
-        bool is_fault_new = (std::find(driver_error_code_template.begin(), driver_error_code_template.end(),current_code) != driver_error_code_template.end());
+        bool is_fault_new = (
+                std::find(driver_error_code_template.begin(), driver_error_code_template.end(), current_code) !=
+                driver_error_code_template.end());
 
-        if(is_fault_new || !is_fault_last){
+        if (is_fault_new || !is_fault_last) {
             code = current_code;
         }
 
@@ -1509,27 +1598,30 @@ int test_tec(int argc, char** argv) {
         PLOGD << "actual_forward_vel: " << SteerConfigArray[driver_id].actual_forward_vel;
     };
 
-    auto update_wheel_rotate = [&](size_t driver_id, const kaco::Message& message){
+    auto update_wheel_rotate = [&](size_t driver_id, const kaco::Message &message) {
         PLOGD << "receive [" << driver_id << "]";
-        int num = * (int*)(&message.data[0]);
+        int num = *(int *) (&message.data[0]);
 
-        std::bitset<16> fault_code = * (int*)(&message.data[4]);
+        std::bitset<16> fault_code = *(int *) (&message.data[4]);
 
-        float rot_angle = num * SteerConfigArray[driver_id].rot_angle_k +  SteerConfigArray[driver_id].rot_angle_b;
+        float rot_angle = num * SteerConfigArray[driver_id].rot_angle_k + SteerConfigArray[driver_id].rot_angle_b;
 
         SteerConfigArray[driver_id].addAngle(rot_angle);
         state_update = true;
-        SteerConfigArray[driver_id].forward_time = common::FromUnixNow();
+        SteerConfigArray[driver_id].rotate_time = common::FromUnixNow();
 
         //error code
-        uint16_t current_code =  * (uint16_t *)(&message.data[4]);
-        auto& code =  driver_error_code[driver_id*2 + 1];
+        uint16_t current_code = *(uint16_t *) (&message.data[4]);
+        auto &code = driver_error_code[driver_id * 2 + 1];
 
-        bool is_fault_last = (std::find(driver_error_code_template.begin(), driver_error_code_template.end(), code) != driver_error_code_template.end());
+        bool is_fault_last = (std::find(driver_error_code_template.begin(), driver_error_code_template.end(), code) !=
+                              driver_error_code_template.end());
 
-        bool is_fault_new = (std::find(driver_error_code_template.begin(), driver_error_code_template.end(),current_code) != driver_error_code_template.end());
+        bool is_fault_new = (
+                std::find(driver_error_code_template.begin(), driver_error_code_template.end(), current_code) !=
+                driver_error_code_template.end());
 
-        if(is_fault_new || !is_fault_last){
+        if (is_fault_new || !is_fault_last) {
             code = current_code;
         }
 
@@ -1538,20 +1630,21 @@ int test_tec(int argc, char** argv) {
         PLOGD << "actual_rot_angle: " << rot_angle;
 
     };
-    auto update_wheel_rotate_abs = [&](size_t driver_id, const kaco::Message& message){
+    auto update_wheel_rotate_abs = [&](size_t driver_id, const kaco::Message &message) {
         PLOGD << "receive [" << driver_id << "]";
 
-        int num = * (int*)(&message.data[0]);
+        int num = *(int *) (&message.data[0]);
 
-        float rot_abs_angle = num * SteerConfigArray[driver_id].rot_angle_abs_k +  SteerConfigArray[driver_id].rot_angle_abs_b;
+        float rot_abs_angle =
+                num * SteerConfigArray[driver_id].rot_angle_abs_k + SteerConfigArray[driver_id].rot_angle_abs_b;
 
         SteerConfigArray[driver_id].addAngleAbs(rot_abs_angle);
-        PLOGD <<  "actual_rot_abs_angle: " << rot_abs_angle;
+        PLOGD << "actual_rot_abs_angle: " << rot_abs_angle;
 
 
     };
 
-    auto update_wheel_rotate_abs_calib = [&](size_t driver_id){
+    auto update_wheel_rotate_abs_calib = [&](size_t driver_id) {
 
         SteerConfigArray[driver_id].angleCalib();
     };
@@ -1569,33 +1662,35 @@ int test_tec(int argc, char** argv) {
 
 
 
-    for(u_int8_t i = 0 ; i < 2; i++){
-        uint8_t forward_driver_id = 3*i + 1;
-        uint8_t rotate_driver_id = 3*i + 2;
-        uint8_t encoder_id = 3*i + 3;
+    for (u_int8_t i = 0; i < 2; i++) {
+        uint8_t forward_driver_id = 2 * i + 1;
+        uint8_t rotate_driver_id = 2 * i + 2;
+//        uint8_t encoder_id = 2*i + 3;
 
 
-        device.pdo.add_pdo_received_callback(0x180 + forward_driver_id, [i,&update_wheel_forward](const kaco::Message& message){
+        device.pdo.add_pdo_received_callback(0x180 + forward_driver_id,
+                                             [i, &update_wheel_forward](const kaco::Message &message) {
 
-            std::cout << "forward : " << int(message.get_node_id())  <<std::endl;
-            message.print();
-            update_wheel_forward(i,message);
+                                                 std::cout << "forward : " << int(message.get_node_id()) << std::endl;
+                                                 message.print();
+                                                 update_wheel_forward(i, message);
 
-        });
+                                             });
 
-        device.pdo.add_pdo_received_callback(0x180 + rotate_driver_id, [i,&update_wheel_rotate](const kaco::Message& message){
-            std::cout << "rotate : " << int(message.get_node_id())  <<std::endl;
-            message.print();
-            update_wheel_rotate(i,message);
-        });
-
+        device.pdo.add_pdo_received_callback(0x180 + rotate_driver_id,
+                                             [i, &update_wheel_rotate](const kaco::Message &message) {
+                                                 std::cout << "rotate : " << int(message.get_node_id()) << std::endl;
+                                                 message.print();
+                                                 update_wheel_rotate(i, message);
+                                             });
+#if 0
         device.pdo.add_pdo_received_callback(0x180 + encoder_id, [i,&update_wheel_rotate_abs](const kaco::Message& message){
 
             std::cout << "encoder : " << int(message.get_node_id())  <<std::endl;
             message.print();
             update_wheel_rotate_abs(i,message);
         });
-
+#endif
     }
 
     // can forward
@@ -1603,11 +1698,11 @@ int test_tec(int argc, char** argv) {
     std::vector<std::vector<kaco::Message>> can_channel_send_msg(2);
 
 
+    for (size_t i = 0; i < CanForwardConfigArray.size(); i++) {
+        auto &c = CanForwardConfigArray[i];
 
-    for(size_t i = 0 ; i < CanForwardConfigArray.size();i++){
-        auto& c = CanForwardConfigArray[i];
-
-        if(c.channel_id <0 || c.channel_id>1 || c.recv_cob_id.empty() || c.pub_topic.empty() || c.sub_topic.empty() ){
+        if (c.channel_id < 0 || c.channel_id > 1 || c.recv_cob_id.empty() || c.pub_topic.empty() ||
+            c.sub_topic.empty()) {
             continue;
         }
 
@@ -1646,13 +1741,13 @@ int test_tec(int argc, char** argv) {
         }
 #endif
 
-        device.register_receive_callback([&c,&can_channel_forward_msg](const kaco::Message& message){
+        device.register_receive_callback([&c, &can_channel_forward_msg](const kaco::Message &message) {
 
-            auto it = std::find(c.recv_cob_id.begin(), c.recv_cob_id.end(),message.cob_id);
-            if(it ==c.recv_cob_id.end() ){
+            auto it = std::find(c.recv_cob_id.begin(), c.recv_cob_id.end(), message.cob_id);
+            if (it == c.recv_cob_id.end()) {
 
-                return ;
-            }else{
+                return;
+            } else {
                 PLOGD << "recv data" << std::endl;
 
                 common_message::CanMessage msg;
@@ -1666,49 +1761,51 @@ int test_tec(int argc, char** argv) {
             }
 
         });
-        auto can_message_sub_cb =[&c,&can_channel_send_msg](void* data){
-            common_message::CanMessageArray * data_ptr = static_cast<common_message::CanMessageArray*>(data);
+        auto can_message_sub_cb = [&c, &can_channel_send_msg](void *data) {
+            common_message::CanMessageArray *data_ptr = static_cast<common_message::CanMessageArray *>(data);
 
             kaco::Message msg;
             PLOGD << "recv data" << std::endl;
 
-            for(size_t i = 0 ; i < data_ptr->messages.size();i++){
+            for (size_t i = 0; i < data_ptr->messages.size(); i++) {
                 msg.cob_id = data_ptr->messages.at(i).id;
                 msg.rtr = data_ptr->messages.at(i).is_rtr;
                 msg.ext = data_ptr->messages.at(i).is_extended;
                 msg.len = data_ptr->messages.at(i).dlc;
-                std::copy(std::begin(data_ptr->messages.at(i).data), std::end(data_ptr->messages.at(i).data), std::begin(msg.data));
+                std::copy(std::begin(data_ptr->messages.at(i).data), std::end(data_ptr->messages.at(i).data),
+                          std::begin(msg.data));
                 can_channel_send_msg[c.channel_id].push_back(msg);
             }
 
         };
-        taskManager.addTask([&rosMessageManager,&c,&device,&can_channel_send_msg,can_message_sub_cb]{
+        taskManager.addTask([&rosMessageManager, &c, &device, &can_channel_send_msg, can_message_sub_cb] {
 
             char key_buffer[100];
-            sprintf(key_buffer,"SUB:%s",c.sub_topic.c_str());
+            sprintf(key_buffer, "SUB:%s", c.sub_topic.c_str());
 
-            rosMessageManager.recv_message(key_buffer,10,0.001, can_message_sub_cb);
+            rosMessageManager.recv_message(key_buffer, 10, 0.001, can_message_sub_cb);
 
-            if(can_channel_send_msg[c.channel_id].empty()){
+            if (can_channel_send_msg[c.channel_id].empty()) {
                 return true;
             }
 
-            device.send( can_channel_send_msg[c.channel_id].data(), can_channel_send_msg[c.channel_id].size(),c.channel_id);
+            device.send(can_channel_send_msg[c.channel_id].data(), can_channel_send_msg[c.channel_id].size(),
+                        c.channel_id);
             can_channel_send_msg[c.channel_id].clear();
 
             return true;
-        },100*1000,2);
-        taskManager.addTask([&rosMessageManager,&c,&can_channel_forward_msg]{
-            if(can_channel_forward_msg[c.channel_id].messages.empty()){
+        }, 100 * 1000, 2);
+        taskManager.addTask([&rosMessageManager, &c, &can_channel_forward_msg] {
+            if (can_channel_forward_msg[c.channel_id].messages.empty()) {
                 return true;
             }
 
             char key_buffer[100];
-            sprintf(key_buffer,"PUB:%s",c.pub_topic.c_str());
-            rosMessageManager.send_message(key_buffer,&can_channel_forward_msg[c.channel_id], 1, 0.1 );
+            sprintf(key_buffer, "PUB:%s", c.pub_topic.c_str());
+            rosMessageManager.send_message(key_buffer, &can_channel_forward_msg[c.channel_id], 1, 0.1);
             can_channel_forward_msg[c.channel_id].messages.clear();
             return true;
-        },100*1000,2);
+        }, 100 * 1000, 2);
 
     }
     // controller
@@ -1717,7 +1814,7 @@ int test_tec(int argc, char** argv) {
 
     //
     std::vector<control::SteerWheelBase> wheels_array(SteerConfigArray.size());
-    for(size_t i = 0 ; i  < SteerConfigArray.size(); i++){
+    for (size_t i = 0; i < SteerConfigArray.size(); i++) {
 
         wheels_array[i].enable_rot = true;
         wheels_array[i].mount_x = SteerConfigArray[i].mount_x;
@@ -1738,12 +1835,12 @@ int test_tec(int argc, char** argv) {
     }
 
 
-    controller.set_wheel(wheels_array[0],wheels_array[1]);
+    controller.set_wheel(wheels_array[0], wheels_array[1]);
 
     controller.smooth_stop = smooth_stop;
 
     control::SmoothSimulator smoothSimulator;
-    smoothSimulator.set_wheel(wheels_array[0],wheels_array[1]);
+    smoothSimulator.set_wheel(wheels_array[0], wheels_array[1]);
 
     motion_planner.m_planner_config = planner_config;
     motion_planner.initBase(wheels_array);
@@ -1757,7 +1854,7 @@ int test_tec(int argc, char** argv) {
     planner_odom_base_tf.target_frame.assign("base_link");
 
 
-    taskManager.addTask([&]{
+    taskManager.addTask([&] {
 
         // lookup tf map base_link
         // lookup tf odom base_link
@@ -1769,11 +1866,11 @@ int test_tec(int argc, char** argv) {
         long rt1 = rosMessageManager.recv_tf(planner_map_base_tf);
         long rt2 = rosMessageManager.recv_tf(planner_odom_base_tf);
 
-        if(rt1 == 0){
+        if (rt1 == 0) {
             motion_planner.updateMapBasePose(planner_map_base_tf);
 
         }
-        if(rt2 == 0){
+        if (rt2 == 0) {
             motion_planner.updateOdomBasePose(planner_odom_base_tf);
         }
 
@@ -1785,107 +1882,104 @@ int test_tec(int argc, char** argv) {
         PLOGD << "motion planner: get_pose: " << get_pose;
 
         return true;
-    },10*1000,0);
+    }, 10 * 1000, 0);
 
-    taskManager.addTask([&]{
+    taskManager.addTask([&] {
         auto now = common::FromUnixNow();
 
 
-
-
-
-
-        if(!motion_planner.m_global_path.value.empty()){
+        if (!motion_planner.m_global_path.value.empty()) {
             size_t pose_num = motion_planner.m_global_path.value.size();
             planner_global_path.poses.resize(pose_num);
-            for(size_t i = 0 ; i < pose_num;i++){
-                planner_global_path.poses[i].pose = common_message::Transform2dToPose(motion_planner.m_global_path.value[i]);
+            for (size_t i = 0; i < pose_num; i++) {
+                planner_global_path.poses[i].pose = common_message::Transform2dToPose(
+                        motion_planner.m_global_path.value[i]);
             }
             planner_global_path.header.stamp = now;
-            rosMessageManager.send_message("PPUB:global_path",&planner_global_path, 1, 0.1 );
+            rosMessageManager.send_message("PPUB:global_path", &planner_global_path, 1, 0.1);
         }
-        if(!motion_planner.m_local_path.value.empty()){
+        if (!motion_planner.m_local_path.value.empty()) {
             size_t pose_num = motion_planner.m_local_path.value.size();
             planner_local_path.poses.resize(pose_num);
-            for(size_t i = 0 ; i < pose_num;i++){
-                planner_local_path.poses[i].pose = common_message::Transform2dToPose(motion_planner.m_local_path.value[i]);
+            for (size_t i = 0; i < pose_num; i++) {
+                planner_local_path.poses[i].pose = common_message::Transform2dToPose(
+                        motion_planner.m_local_path.value[i]);
             }
             planner_local_path.header.stamp = now;
-            rosMessageManager.send_message("PPUB:local_path",&planner_local_path, 1, 0.1 );
+            rosMessageManager.send_message("PPUB:local_path", &planner_local_path, 1, 0.1);
         }
 
-        if(motion_planner.m_stable_pose_get){
+        if (motion_planner.m_stable_pose_get) {
 
             planner_stable_pose.pose.pose = common_message::Transform2dToPose(motion_planner.m_actual_pose.value);
             planner_stable_pose.header.stamp = now;
-            rosMessageManager.send_message("PPUB:stable_pose",&planner_stable_pose, 1, 0.1 );
+            rosMessageManager.send_message("PPUB:stable_pose", &planner_stable_pose, 1, 0.1);
 
         }
 
         planner_status.header.frame_id = motion_planner.getTaskFrame();
-        if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::idle){
-            planner_status.data.assign("idle") ;
-        }
-        else if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::finished){
-            planner_status.data.assign("finished") ;
-        }else if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::error_path){
-            planner_status.data.assign(motion_planner.getStatusMsg()) ;
-        }else if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::off_path){
+        if (motion_planner.getTaskState() == control::MotionPlanner::TaskState::idle) {
+            planner_status.data.assign("idle");
+        } else if (motion_planner.getTaskState() == control::MotionPlanner::TaskState::finished) {
+            planner_status.data.assign("finished");
+        } else if (motion_planner.getTaskState() == control::MotionPlanner::TaskState::error_path) {
+            planner_status.data.assign(motion_planner.getStatusMsg());
+        } else if (motion_planner.getTaskState() == control::MotionPlanner::TaskState::off_path) {
             motion_planner_error = true;
-            planner_status.data.assign(motion_planner.getStatusMsg()) ;
-        }else{
-            planner_status.data.assign("running") ;
+            planner_status.data.assign(motion_planner.getStatusMsg());
+        } else {
+            planner_status.data.assign("running");
 
             // suspend running task
-            if(is_command_need_recover){
-                planner_status.data.assign("suspend") ;
+            if (is_command_need_recover) {
+                planner_status.data.assign("suspend");
             }
         }
 
-        if(driver_comm_timeout){
+        if (driver_comm_timeout) {
             char msg[500];
-            sprintf(msg,"driver_error: driver communication timeout: [%i,%i], [%i,%i]",
+            sprintf(msg, "driver_error: driver communication timeout: [%i,%i], [%i,%i]",
                     SteerConfigArray[0].forward_feedback_timeout,
                     SteerConfigArray[0].rotate_feedback_timeout,
                     SteerConfigArray[1].forward_feedback_timeout,
                     SteerConfigArray[1].rotate_feedback_timeout
             );
 
-            planner_status.data.assign(msg) ;
+            planner_status.data.assign(msg);
 
         }
-        if(driver_action_timeout){
+        if (driver_action_timeout) {
 
             char msg[500];
-            sprintf(msg,"driver_error: driver action timeout: [%i,%i], [%i,%i]",
+            sprintf(msg, "driver_error: driver action timeout: [%i,%i], [%i,%i]",
                     controller.m_steer_wheel[0].forward_action_timeout_timer.eval(),
                     controller.m_steer_wheel[0].rotate_action_timeout_timer.eval(),
                     controller.m_steer_wheel[1].forward_action_timeout_timer.eval(),
                     controller.m_steer_wheel[1].rotate_action_timeout_timer.eval()
             );
-            planner_status.data.assign(msg) ;
+            planner_status.data.assign(msg);
         }
-        if(!device_open_successful){
-            planner_status.data.assign("driver_error: can device open failed") ;
+        if (!device_open_successful) {
+            planner_status.data.assign("driver_error: can device open failed");
             is_any_fault_exist = true;
         }
-        if(is_any_fault_exist){
+        if (is_any_fault_exist) {
             motion_planner.reset();
             motion_planner_error = true;
         }
 
 
         bool get_pose = motion_planner.getStablePose();
-        if(get_pose){
-            rosMessageManager.recv_message("PSUB:request_goal",1,0.001, planner_goal_sub_cb);
-            rosMessageManager.recv_message("PSUB:request_path",1,0.001, planner_path_sub_cb);
+        if (get_pose) {
+            rosMessageManager.recv_message("PSUB:request_goal", 1, 0.001, planner_goal_sub_cb);
+            rosMessageManager.recv_message("PSUB:request_path", 1, 0.001, planner_path_sub_cb);
         }
 
-        rosMessageManager.send_message("PPUB:status",&planner_status, 1, 0.1 );
+        rosMessageManager.send_message("PPUB:status", &planner_status, 1, 0.1);
 
 
         return true;
-    },100*1000,1);
+    }, 100 * 1000, 1);
 
     common_message::TransformStamped send_map_odom_tf, send_odom_base_tf;
     send_map_odom_tf.base_frame.assign("map");
@@ -1895,22 +1989,23 @@ int test_tec(int argc, char** argv) {
     double send_map_odom_tf_x = 0.0;
     double send_map_odom_tf_y = 0.0;
 
-    send_map_odom_tf.transform = transform::createSe3<double>(send_map_odom_tf_x,send_map_odom_tf_y,0.0,0.0,0.0,0.0);
+    send_map_odom_tf.transform = transform::createSe3<double>(send_map_odom_tf_x, send_map_odom_tf_y, 0.0, 0.0, 0.0,
+                                                              0.0);
 
 
-    Eigen::Transform<double,3,Eigen::Isometry> odom_base_transform;
+    Eigen::Transform<double, 3, Eigen::Isometry> odom_base_transform;
 
-    if(!use_sim){
+    if (!use_sim) {
         if (!device.start(busname, baudrate)) {
             std::cout << "Starting device failed." << std::endl;
             device_open_successful = false;
-        }else{
+        } else {
             device_open_successful = true;
 
         }
 
-        if(device_open_successful){
-            taskManager.addTask([&]{
+        if (device_open_successful) {
+            taskManager.addTask([&] {
 
                 check_all_state();
                 // if not operational, send nmt start
@@ -1918,57 +2013,62 @@ int test_tec(int argc, char** argv) {
 //                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_1);
 //                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_2);
 //            }
-                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_1);
-                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_2);
-
+                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node, send_to_channel_1);
+                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node, send_to_channel_2);
 
 
                 return true;
-            },1000*1000,0);
+            }, 1000 * 1000, 0);
 
-            taskManager.addTask([&]{
+            taskManager.addTask([&] {
                 device.nmt.send_sync_message(send_to_channel_1);
                 device.nmt.send_sync_message(send_to_channel_2);
-                device.recv_message(message_buffer,0, message_buffer.size());
-                device.recv_message(message_buffer,1, message_buffer.size());
+                device.recv_message(message_buffer, 0, message_buffer.size());
+                device.recv_message(message_buffer, 1, message_buffer.size());
                 return true;
-            },5*1000,0);
+            }, 5 * 1000, 0);
 
 
             // initializer
-            taskManager.addTask([&]{
+            taskManager.addTask([&] {
 //            PLOGF.printf("driver error:is_all_alive : %i, driver_action_timeout : %i,  ",is_all_alive, driver_action_timeout);
 
-                if(is_all_alive){
+                if (is_all_alive) {
 
-                    if(driver_init_command){
+                    if (driver_init_command) {
                         is_all_initialise_triggered = false;
                         is_all_initialised = false;
 
                     }
 
 
-                    if(!is_all_initialise_triggered){
+                    if (!is_all_initialise_triggered) {
 
                         // run once
 
                         // clear error code
                         is_any_fault_exist = false;
-                        std::fill(driver_error_code.begin(), driver_error_code.end(),0);
+                        std::fill(driver_error_code.begin(), driver_error_code.end(), 0);
 
                         is_all_initialise_triggered = true;
                         is_all_initialised = false;
-                        taskManager.addTask([&]{
+                        taskManager.addTask([&] {
 
 
-                            if(!is_all_initialised){
+                            if (!is_all_initialised) {
                                 initialise_forward_driver(1);
                                 initialise_rotate_driver(2);
 
-                                initialise_forward_driver(4);
-                                initialise_rotate_driver(5);
+                                initialise_forward_driver(3);
+                                initialise_rotate_driver(4);
 
-                                taskManager.addTask([&]{
+                                reset_forward_driver(1);
+                                reset_rotate_driver(2);
+                                reset_forward_driver(3);
+                                reset_rotate_driver(4);
+
+
+                                taskManager.addTask([&] {
                                     is_any_fault_exist = false;
                                     motion_planner_error = false;
                                     driver_action_timeout = false;
@@ -1978,24 +2078,21 @@ int test_tec(int argc, char** argv) {
 
                                     auto now = common::FromUnixNow();
 
-                                    for(int i = 0; i < CONTROLLER_NUM;i++){
+                                    for (int i = 0; i < CONTROLLER_NUM; i++) {
 
                                         SteerConfigArray[i].forward_time = now;
                                         SteerConfigArray[i].rotate_time = now;
                                     }
 
 
-
-                                    std::fill(driver_error_code.begin(), driver_error_code.end(),0);
+                                    std::fill(driver_error_code.begin(), driver_error_code.end(), 0);
                                     return false;
-                                }, initialise_wait_s*1000*1000, 0);
+                                }, initialise_wait_s * 1000 * 1000, 0);
                             }
 
 
-
-
                             return false;
-                        },100*1000, 0);
+                        }, 100 * 1000, 0);
 
 
                     }
@@ -2033,34 +2130,33 @@ int test_tec(int argc, char** argv) {
 #endif
 
 
-                }else{
+                } else {
                     return true;
                 }
 
 
                 return true;
-            }, 50*1000,1);
+            }, 50 * 1000, 1);
 
             // rot
-            taskManager.addTask([&]{
+            taskManager.addTask([&] {
                 is_rot_sensor_ready = true;
-                for(size_t i = 0 ; i < SteerConfigArray.size();i++){
+                for (size_t i = 0; i < SteerConfigArray.size(); i++) {
                     SteerConfigArray[i].angleCalib();
                     is_rot_sensor_ready = is_rot_sensor_ready && SteerConfigArray[i].isAngleCalib();
                 }
                 return true;
-            }, 500*1000,1);
+            }, 500 * 1000, 1);
         }
 
 
-
-    }else{
+    } else {
 
         device_open_successful = true;
 
-        taskManager.addTask([&]{
+        taskManager.addTask([&] {
 
-            if(path_config.empty()){
+            if (path_config.empty()) {
                 return false;
             }
 
@@ -2068,31 +2164,29 @@ int test_tec(int argc, char** argv) {
             planner_global_path.header.stamp = now;
             motion_planner.requestPath(planner_global_path);
 
-            rosMessageManager.send_message("PPUB:global_path",&planner_global_path, 1, 0.1 );
+            rosMessageManager.send_message("PPUB:global_path", &planner_global_path, 1, 0.1);
 
 
             return false;
-        },2*1000*1000,1);
+        }, 2 * 1000 * 1000, 1);
 
 
+        taskManager.addTask([&] {
 
 
-
-
-        taskManager.addTask([&]{
-
-
-            smoothSimulator.updateState(controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle(),
-                                        controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle());
+            smoothSimulator.updateState(controller.m_steer_wheel[0].getCommandForwardVel(),
+                                        controller.m_steer_wheel[0].getCommandRotateAngle(),
+                                        controller.m_steer_wheel[1].getCommandForwardVel(),
+                                        controller.m_steer_wheel[1].getCommandRotateAngle());
 
 
             auto now = common::FromUnixNow();
 
-            for(int i = 0; i < CONTROLLER_NUM;i++){
+            for (int i = 0; i < CONTROLLER_NUM; i++) {
 
                 SteerConfigArray[i].forward_time = now;
                 SteerConfigArray[i].rotate_time = now;
-                SteerConfigArray[i].actual_forward_vel = smoothSimulator.m_steer_wheel[i].actual_forward_vel  ;
+                SteerConfigArray[i].actual_forward_vel = smoothSimulator.m_steer_wheel[i].actual_forward_vel;
                 SteerConfigArray[i].actual_rot_abs_angle = smoothSimulator.m_steer_wheel[i].actual_rot_angle;
 
             }
@@ -2100,7 +2194,8 @@ int test_tec(int argc, char** argv) {
             send_map_odom_tf.time = common::FromUnixNow();
             send_odom_base_tf.time = common::FromUnixNow();
 
-            send_map_odom_tf.transform = transform::createSe3<double>(send_map_odom_tf_x,send_map_odom_tf_y,0.0,0.0,0.0,0.0);
+            send_map_odom_tf.transform = transform::createSe3<double>(send_map_odom_tf_x, send_map_odom_tf_y, 0.0, 0.0,
+                                                                      0.0, 0.0);
             send_odom_base_tf.transform = odom_base_transform;
 
             rosMessageManager.send_tf(send_map_odom_tf);
@@ -2113,7 +2208,7 @@ int test_tec(int argc, char** argv) {
             is_rot_sensor_ready = true;
 
             return true;
-        },20*1000,0);
+        }, 20 * 1000, 0);
 
     }
 
@@ -2137,7 +2232,7 @@ int test_tec(int argc, char** argv) {
 #endif
 
     // odom
-    taskManager.addTask([&]{
+    taskManager.addTask([&] {
 
 
         PLOGD << "is_all_alive: " << is_all_alive;
@@ -2145,48 +2240,56 @@ int test_tec(int argc, char** argv) {
         PLOGD << "is_all_initialised: " << is_all_initialised;
 
 
-        if(is_all_alive && is_rot_sensor_ready && is_all_initialised){
+        if (is_all_alive && is_rot_sensor_ready && is_all_initialised) {
             auto now = common::FromUnixNow();
 
 
-            PLOGD << "update driver0 feedback[forward_vel, rotate_angle], " << SteerConfigArray[0].actual_forward_vel << ", " << SteerConfigArray[0].actual_rot_abs_angle;
-            PLOGD << "update driver1 feedback[forward_vel, rotate_angle], " << SteerConfigArray[1].actual_forward_vel << ", " << SteerConfigArray[1].actual_rot_abs_angle;
+            PLOGD << "update driver0 feedback[forward_vel, rotate_angle], " << SteerConfigArray[0].actual_forward_vel
+                  << ", " << SteerConfigArray[0].actual_rot_abs_angle;
+            PLOGD << "update driver1 feedback[forward_vel, rotate_angle], " << SteerConfigArray[1].actual_forward_vel
+                  << ", " << SteerConfigArray[1].actual_rot_abs_angle;
 
             {
-                controller.updateState(SteerConfigArray[0].actual_forward_vel,SteerConfigArray[0].actual_rot_abs_angle, SteerConfigArray[1].actual_forward_vel,SteerConfigArray[1].actual_rot_abs_angle);
+                controller.updateState(SteerConfigArray[0].actual_forward_vel, SteerConfigArray[0].actual_rot_abs_angle,
+                                       SteerConfigArray[1].actual_forward_vel,
+                                       SteerConfigArray[1].actual_rot_abs_angle);
                 state_update = false;
             }
 
             // todoo: check action timeout
             {
-                for(size_t i = 0 ; i < CONTROLLER_NUM;i++){
+                for (size_t i = 0; i < CONTROLLER_NUM; i++) {
 
                     controller.m_steer_wheel[i].check();
-                    SteerConfigArray[i].forward_feedback_timeout = std::abs(common::ToMillSeconds(now - SteerConfigArray[i].forward_time )) >  SteerConfigArray[i].comm_timeout_s *1000;
-                    SteerConfigArray[i].rotate_feedback_timeout = std::abs(common::ToMillSeconds(now - SteerConfigArray[i].rotate_time )) >  SteerConfigArray[i].comm_timeout_s*1000;
+                    SteerConfigArray[i].forward_feedback_timeout =
+                            std::abs(common::ToMillSeconds(now - SteerConfigArray[i].forward_time)) >
+                            SteerConfigArray[i].comm_timeout_s * 1000;
+                    SteerConfigArray[i].rotate_feedback_timeout =
+                            std::abs(common::ToMillSeconds(now - SteerConfigArray[i].rotate_time)) >
+                            SteerConfigArray[i].comm_timeout_s * 1000;
 
 
-                    driver_comm_timeout = driver_comm_timeout || (
-                                                                         SteerConfigArray[i].forward_feedback_timeout
+                    driver_comm_timeout = driver_comm_timeout
+                            || SteerConfigArray[i].forward_feedback_timeout
+                            || SteerConfigArray[i].rotate_feedback_timeout
 
-                            )
-                                    ||
-                                    (
-                                            SteerConfigArray[i].rotate_feedback_timeout
-
-                                    );
+                                          ;
 //                    PLOGF.printf("driver_comm_timeout[%i] error: forward_time: %i, rotate_time : %i ",i, std::abs(common::ToMillSeconds(now - SteerConfigArray[i].forward_time )), std::abs(common::ToMillSeconds(now - SteerConfigArray[i].rotate_time )));
 
-                    driver_action_timeout = driver_action_timeout || controller.m_steer_wheel[i].forward_action_timeout_timer.eval() || controller.m_steer_wheel[i].rotate_action_timeout_timer.eval();
+                    driver_action_timeout =
+                            driver_action_timeout || controller.m_steer_wheel[i].forward_action_timeout_timer.eval() ||
+                            controller.m_steer_wheel[i].rotate_action_timeout_timer.eval();
                 }
 
+//                driver_comm_timeout = false;
+                driver_action_timeout = false;
                 is_any_fault_exist = is_any_fault_exist || driver_comm_timeout || driver_action_timeout;
 
 
 //                PLOGF.printf("driver error: driver_comm_timeout: %i, driver_action_timeout : %i ",driver_comm_timeout, driver_action_timeout);
-                if(is_any_fault_exist){
-                    for(size_t i = 0 ; i < CONTROLLER_NUM;i++){
-                        SteerConfigArray[i].actual_forward_vel = 0.0 ;
+                if (is_any_fault_exist) {
+                    for (size_t i = 0; i < CONTROLLER_NUM; i++) {
+                        SteerConfigArray[i].actual_forward_vel = 0.0;
 //                        SteerConfigArray[i].actual_rot_abs_angle = 0.0;
                     }
                 }
@@ -2194,11 +2297,10 @@ int test_tec(int argc, char** argv) {
             }
 
 
-
             odom.header.stamp = common::FromUnixNow();
 
 
-            const transform::Transform2d& robot_pose = controller.getPosition();
+            const transform::Transform2d &robot_pose = controller.getPosition();
 //            odom.pose.pose.position.x = robot_pose.x();
 //            odom.pose.pose.position.y = robot_pose.y();
 //            odom.pose.pose.position.z = 0.0;
@@ -2206,12 +2308,13 @@ int test_tec(int argc, char** argv) {
 
 
 
-            odom_base_transform = transform::createSe3<double>(robot_pose.x(),robot_pose.y(),0.0f,0.0f,0.0f,robot_pose.yaw() );
+            odom_base_transform = transform::createSe3<double>(robot_pose.x(), robot_pose.y(), 0.0f, 0.0f, 0.0f,
+                                                               robot_pose.yaw());
 
-            double tx,ty,tz,qw,qx,qy,qz;
+            double tx, ty, tz, qw, qx, qy, qz;
 //            transform::extractSe3<double>(pose,odom.pose.pose.position.x, odom.pose.pose.position.y, odom.pose.pose.position.z, odom.pose.pose.orientation.w, odom.pose.pose.orientation.x,odom.pose.pose.orientation.y,odom.pose.pose.orientation.z );
 
-            transform::extractSe3<double>(odom_base_transform,tx,ty,tz,qw,qx,qy,qz );
+            transform::extractSe3<double>(odom_base_transform, tx, ty, tz, qw, qx, qy, qz);
 
             odom.pose.pose.position.x = tx;
             odom.pose.pose.position.y = ty;
@@ -2227,50 +2330,66 @@ int test_tec(int argc, char** argv) {
             odom.twist.twist.angular.z = controller.getActualRotateVel();
 
 
-
-            rosMessageManager.send_message("PUB:odom",&odom, 1, 0.1 );
-            rosMessageManager.send_message("PPUB:error_code",&driver_error_code, 1, 0.1 );
-            rosMessageManager.send_message("PUB:cmd_vel_planner",&send_cmd_vel,1,0.01);
+            rosMessageManager.send_message("PUB:odom", &odom, 1, 0.1);
+            rosMessageManager.send_message("PPUB:error_code", &driver_error_code, 1, 0.1);
+            rosMessageManager.send_message("PUB:cmd_vel_planner", &send_cmd_vel, 1, 0.01);
 
 
             {
                 auto now = common::FromUnixNow();
                 // mqtt
-                if(mqtt_msg_status_cnt < FRAME_NUM ){
+                if (mqtt_msg_status_cnt < FRAME_NUM) {
                     float ts = common::ToMicroSeconds(now - record_start_time) * 1e-6;
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 0 ] = ts;
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM + 0] = ts;
 
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 1 ] = controller.m_steer_wheel[0].getCommandForwardVel();
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 2 ] = controller.m_steer_wheel[0].actual_forward_vel;
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 3 ] = controller.m_steer_wheel[0].getCommandRotateAngle();
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 4 ] = controller.m_steer_wheel[0].actual_rot_angle;
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 5 ] = controller.m_steer_wheel[0].steer_constrain_vel;
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM +
+                                    1] = controller.m_steer_wheel[0].getCommandForwardVel();
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM +
+                                    2] = controller.m_steer_wheel[0].actual_forward_vel;
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM +
+                                    3] = controller.m_steer_wheel[0].getCommandRotateAngle();
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM +
+                                    4] = controller.m_steer_wheel[0].actual_rot_angle;
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM +
+                                    5] = controller.m_steer_wheel[0].steer_constrain_vel;
 
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 6 ] = controller.m_steer_wheel[1].getCommandForwardVel();
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 7 ] = controller.m_steer_wheel[1].actual_forward_vel;
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 8 ] = controller.m_steer_wheel[1].getCommandRotateAngle();
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 9 ] = controller.m_steer_wheel[1].actual_rot_angle;
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 10 ] = controller.m_steer_wheel[1].steer_constrain_vel;
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 11 ] = recv_cmd_vel_msg.linear.x;
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 12 ] = recv_cmd_vel_msg.linear.y;
-                    mqtt_msg_status[mqtt_msg_status_cnt*STATUS_NUM + 13 ] = recv_cmd_vel_msg.angular.z;
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM +
+                                    6] = controller.m_steer_wheel[1].getCommandForwardVel();
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM +
+                                    7] = controller.m_steer_wheel[1].actual_forward_vel;
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM +
+                                    8] = controller.m_steer_wheel[1].getCommandRotateAngle();
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM +
+                                    9] = controller.m_steer_wheel[1].actual_rot_angle;
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM +
+                                    10] = controller.m_steer_wheel[1].steer_constrain_vel;
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM + 11] = recv_cmd_vel_msg.linear.x;
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM + 12] = recv_cmd_vel_msg.linear.y;
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM + 13] = recv_cmd_vel_msg.angular.z;
+
+
+                    // report error
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM + 14] = motion_planner.m_report_error[0];
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM + 15] = motion_planner.m_report_error[1];
+                    mqtt_msg_status[mqtt_msg_status_cnt * STATUS_NUM + 16] = motion_planner.m_report_error[2];
+
 
                 }
                 mqtt_msg_status_cnt++;
 
 
-                if(mqtt_msg_status_cnt == FRAME_NUM){
+                if (mqtt_msg_status_cnt == FRAME_NUM) {
                     record_start_time = now;
 
-                    for(int i = 0; i <FRAME_NUM*STATUS_NUM; i++ ){
-                        mqtt_msg_status_int[i] =  int16_t (mqtt_msg_status[i]*1e4) ;
+                    for (int i = 0; i < FRAME_NUM * STATUS_NUM; i++) {
+                        mqtt_msg_status_int[i] = int16_t(mqtt_msg_status[i] * 1e4);
                     }
 
-                    mqtt_binary_str.assign((char*)(&mqtt_msg_status_int[0])  , FRAME_NUM*STATUS_NUM*2 );
+                    mqtt_binary_str.assign((char *) (&mqtt_msg_status_int[0]), FRAME_NUM * STATUS_NUM * 2);
 
-                    mqtt_base64_str= absl::Base64Escape(mqtt_binary_str);
+                    mqtt_base64_str = absl::Base64Escape(mqtt_binary_str);
 
-                    mqttMessageManager.send_message(mqtt_pub_topic.c_str(), &mqtt_base64_str,1,0.1);
+                    mqttMessageManager.send_message(mqtt_pub_topic.c_str(), &mqtt_base64_str, 1, 0.1);
 
 
                     mqtt_msg_status_cnt = 0;
@@ -2278,47 +2397,48 @@ int test_tec(int argc, char** argv) {
             }
 
 
-        }else{
+        } else {
         }
 
 
         return true;
-    }, 15*1000,1);
+    }, 15 * 1000, 1);
 
     // cmd_vel
     int cmd_vel_timeout_counter = 0;
-    if(!enable_fix_command){
+    if (!enable_fix_command) {
         PLOGD << "add cmd_vel command";
-        taskManager.addTask([&]{
+        taskManager.addTask([&] {
 
             //todo: remove
 //            is_any_fault_exist = false;
 
-            if((is_all_alive && is_all_initialised && is_rot_sensor_ready && ! is_any_fault_exist) && !motion_planner_error  ){
+            if ((is_all_alive && is_all_initialised && is_rot_sensor_ready && !is_any_fault_exist) &&
+                !motion_planner_error) {
 
-                rosMessageManager.recv_message("SUB:control_cmd_vel",10,0.001, cmd_vel_sub_cb);
+                rosMessageManager.recv_message("SUB:control_cmd_vel", 10, 0.001, cmd_vel_sub_cb);
 
-                if(recv_new_cmd_vel){
-                    dynamic_forward_vel = std::sqrt(recv_cmd_vel_msg.linear.x*recv_cmd_vel_msg.linear.x + recv_cmd_vel_msg.linear.y* recv_cmd_vel_msg.linear.y );
+                if (recv_new_cmd_vel) {
+                    dynamic_forward_vel = std::sqrt(recv_cmd_vel_msg.linear.x * recv_cmd_vel_msg.linear.x +
+                                                    recv_cmd_vel_msg.linear.y * recv_cmd_vel_msg.linear.y);
                     dynamic_rotate_vel = recv_cmd_vel_msg.angular.z;
                     recv_new_cmd_vel = false;
-                    PLOGD<< "recv cmd_vel:[rotate_vel,forward_vel]: " << recv_cmd_vel_msg.angular.z << ", " << recv_cmd_vel_msg.linear.x;
+                    PLOGD << "recv cmd_vel:[rotate_vel,forward_vel]: " << recv_cmd_vel_msg.angular.z << ", "
+                          << recv_cmd_vel_msg.linear.x;
 
 
-
-                    if(use_dynamic_vel){
+                    if (use_dynamic_vel) {
                         bool temp_stop = std::abs(recv_cmd_vel_msg.linear.x) < 0.001
                                          && std::abs(recv_cmd_vel_msg.linear.y) < 0.001
                                          && std::abs(recv_cmd_vel_msg.angular.z) < 0.001;
 
                         command_recovery_timer.on(!temp_stop);
-                        if(temp_stop){
+                        if (temp_stop) {
                             is_command_need_recover = is_planner_running;
-                        }else{
-                            if(is_command_need_recover)
+                        } else {
+                            if (is_command_need_recover)
                                 is_command_need_recover = is_planner_running && !command_recovery_timer.eval();
                         }
-
 
 
                         is_control_stop_command = temp_stop;
@@ -2326,17 +2446,16 @@ int test_tec(int argc, char** argv) {
                     }
 
 
-
-
                 }
 
 
-
-
-                if(motion_planner.getTaskState() == control::MotionPlanner::TaskState::idle || motion_planner.getTaskState() == control::MotionPlanner::TaskState::finished || motion_planner.getTaskState() == control::MotionPlanner::TaskState::error_path || motion_planner.getTaskState() == control::MotionPlanner::TaskState::off_path ){
+                if (motion_planner.getTaskState() == control::MotionPlanner::TaskState::idle ||
+                    motion_planner.getTaskState() == control::MotionPlanner::TaskState::finished ||
+                    motion_planner.getTaskState() == control::MotionPlanner::TaskState::error_path ||
+                    motion_planner.getTaskState() == control::MotionPlanner::TaskState::off_path) {
                     is_planner_running = false;
                     auto now = common::FromUnixNow();
-                    if( common::ToMillSeconds(now - recv_cmd_vel_time) > cmd_vel_timeout_ms){
+                    if (common::ToMillSeconds(now - recv_cmd_vel_time) > cmd_vel_timeout_ms) {
 
                         PLOGD << "cmd_vel timeout, cmd_vel reset";
                         recv_cmd_vel_msg.linear.x = 0.0;
@@ -2347,9 +2466,7 @@ int test_tec(int argc, char** argv) {
                     }
 
 
-
                     {
-
 
 
 #if 0
@@ -2389,32 +2506,37 @@ int test_tec(int argc, char** argv) {
 #endif
                     }
 
-                }else{
+                } else {
 //                    PLOGF << "motion_planner.updateWheelState";
                     is_planner_running = true;
-                    motion_planner.updateWheelState(SteerConfigArray[0].actual_forward_vel,SteerConfigArray[0].actual_rot_abs_angle, SteerConfigArray[1].actual_forward_vel,SteerConfigArray[1].actual_rot_abs_angle);
+                    motion_planner.updateWheelState(SteerConfigArray[0].actual_forward_vel,
+                                                    SteerConfigArray[0].actual_rot_abs_angle,
+                                                    SteerConfigArray[1].actual_forward_vel,
+                                                    SteerConfigArray[1].actual_rot_abs_angle);
 
                     common::Time t1 = common::FromUnixNow();
 //                    PLOGF << "motion_planner.go";
 
                     motion_planner.go();
-                    auto& command = motion_planner.getCommand();
+                    auto &command = motion_planner.getCommand();
 
                     PLOGD << "go_time: " << common::ToMillSeconds(common::FromUnixNow() - t1) << " ms";
 
-                    if(0){
+                    if (0) {
 
-                        if(!motion_planner.m_local_path.value.empty()){
+                        if (!motion_planner.m_local_path.value.empty()) {
                             size_t pose_num = motion_planner.m_local_path.value.size();
                             planner_local_path.poses.resize(pose_num);
-                            for(size_t i = 0 ; i < pose_num;i++){
-                                planner_local_path.poses[i].pose = common_message::Transform2dToPose(motion_planner.m_local_path.value[i]);
+                            for (size_t i = 0; i < pose_num; i++) {
+                                planner_local_path.poses[i].pose = common_message::Transform2dToPose(
+                                        motion_planner.m_local_path.value[i]);
                             }
                             planner_local_path.header.stamp = common::FromUnixNow();
-                            rosMessageManager.send_message("PPUB:local_path",&planner_local_path, 1, 0.1 );
+                            rosMessageManager.send_message("PPUB:local_path", &planner_local_path, 1, 0.1);
                         }
                     }
-                    if(command.command_type == control::MotionPlanner::CommandType::cmd_vel && command.command.size() == 3 ){
+                    if (command.command_type == control::MotionPlanner::CommandType::cmd_vel &&
+                        command.command.size() == 3) {
 
 //                        PLOGF << "cmd_vel: " << command.command[0] << ", " << command.command[1] << ", " << command.command[2];
 
@@ -2428,25 +2550,30 @@ int test_tec(int argc, char** argv) {
 
                         controller.setSteerPreference(motion_planner.get_prefer_steer_angle());
 #endif
-                    }else if(command.command_type == control::MotionPlanner::CommandType::steer && command.command.size() == 1 ){
+                    } else if (command.command_type == control::MotionPlanner::CommandType::steer &&
+                               command.command.size() == 1) {
 
 
-
-                        controller.m_steer_wheel[0].getCommandForwardVel() =  0.0f;
-                        controller.m_steer_wheel[0].getCommandRotateAngle() =  std::max(std::min(1.918888889f,  command.command[0]),-1.918888889f);
-                        controller.m_steer_wheel[1].getCommandForwardVel() =  0.0f;
-                        controller.m_steer_wheel[1].getCommandRotateAngle() =  std::max(std::min(1.918888889f,  command.command[0]),-1.918888889f);
+                        controller.m_steer_wheel[0].getCommandForwardVel() = 0.0f;
+                        controller.m_steer_wheel[0].getCommandRotateAngle() = std::max(
+                                std::min(1.918888889f, command.command[0]), -1.918888889f);
+                        controller.m_steer_wheel[1].getCommandForwardVel() = 0.0f;
+                        controller.m_steer_wheel[1].getCommandRotateAngle() = std::max(
+                                std::min(1.918888889f, command.command[0]), -1.918888889f);
 
 //                        PLOGF << "steer command: " << command.command[0];
 
-                        control_wheel(true,false, controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle() ,controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle() );
+                        control_wheel(true, false, controller.m_steer_wheel[0].getCommandForwardVel(),
+                                      controller.m_steer_wheel[0].getCommandRotateAngle(),
+                                      controller.m_steer_wheel[1].getCommandForwardVel(),
+                                      controller.m_steer_wheel[1].getCommandRotateAngle());
                         recv_cmd_vel_msg.linear.x = 0.0;
                         recv_cmd_vel_msg.linear.y = 0.0;
                         recv_cmd_vel_msg.angular.z = 0.0;
 
                         controller.bypass();
                         return true;
-                    }else{
+                    } else {
 //                        controller.setSteerPreference(0.0f);
                         recv_cmd_vel_msg.linear.x = 0.0;
                         recv_cmd_vel_msg.linear.y = 0.0;
@@ -2467,36 +2594,38 @@ int test_tec(int argc, char** argv) {
 
                 // controller compute
                 {
-                    float vel = std::sqrt(recv_cmd_vel_msg.linear.x*recv_cmd_vel_msg.linear.x + recv_cmd_vel_msg.linear.y*recv_cmd_vel_msg.linear.y);
+                    float vel = std::sqrt(recv_cmd_vel_msg.linear.x * recv_cmd_vel_msg.linear.x +
+                                          recv_cmd_vel_msg.linear.y * recv_cmd_vel_msg.linear.y);
 
 
-                    if(is_command_need_recover){
+                    if (is_command_need_recover) {
                         dynamic_forward_vel = 0.0f;
                         dynamic_rotate_vel = 0.0f;
                     }
 
-                    if (std::abs(vel) < 0.00001){
+                    if (std::abs(vel) < 0.00001) {
 
-                        if(use_dynamic_vel){
+                        if (use_dynamic_vel) {
                             float ratio = 1.0;
-                            if(std::abs(recv_cmd_vel_msg.angular.z) > 0.0001){
-                                ratio = std::min(1.0f, std::abs(dynamic_rotate_vel)/std::abs(recv_cmd_vel_msg.angular.z));
+                            if (std::abs(recv_cmd_vel_msg.angular.z) > 0.0001) {
+                                ratio = std::min(1.0f,
+                                                 std::abs(dynamic_rotate_vel) / std::abs(recv_cmd_vel_msg.angular.z));
                                 recv_cmd_vel_msg.angular.z *= ratio;
-                            }else{
+                            } else {
                                 recv_cmd_vel_msg.angular.z = 0.0f;
                             }
                             PLOGD << "dynamic, for_ward_vel: " << vel << ", rot_vel: " << recv_cmd_vel_msg.angular.z;
 
                         }
-                        controller.cmd_vel(0.0,recv_cmd_vel_msg.angular.z);
+                        controller.cmd_vel(0.0, recv_cmd_vel_msg.angular.z);
 
-                    }else{
+                    } else {
 
 
-                        if(use_dynamic_vel){
+                        if (use_dynamic_vel) {
                             float ratio = 1.0;
 
-                            ratio = std::min(1.0f,dynamic_forward_vel/vel);
+                            ratio = std::min(1.0f, dynamic_forward_vel / vel);
 
                             vel *= ratio;
                             recv_cmd_vel_msg.angular.z *= ratio;
@@ -2504,7 +2633,7 @@ int test_tec(int argc, char** argv) {
                             PLOGD << "dynamic, for_ward_vel: " << vel << ", rot_vel: " << recv_cmd_vel_msg.angular.z;
                         }
                         float vel_angle = std::atan2(recv_cmd_vel_msg.linear.y, recv_cmd_vel_msg.linear.x);
-                        controller.cmd_vel(vel,recv_cmd_vel_msg.angular.z,vel_angle);
+                        controller.cmd_vel(vel, recv_cmd_vel_msg.angular.z, vel_angle);
                     }
                 }
 
@@ -2512,17 +2641,20 @@ int test_tec(int argc, char** argv) {
 
                 controller.interpolate();
 
-                PLOGD<< "get target   :[rotate_angle,forward_vel]\n" << controller.m_steer_wheel[0].target_rot_angle << ", "
-                     << controller.m_steer_wheel[0].target_forward_vel << ", "
-                     << controller.m_steer_wheel[1].target_rot_angle << ", "
-                     << controller.m_steer_wheel[1].target_forward_vel;
+                PLOGD << "get target   :[rotate_angle,forward_vel]\n" << controller.m_steer_wheel[0].target_rot_angle
+                      << ", "
+                      << controller.m_steer_wheel[0].target_forward_vel << ", "
+                      << controller.m_steer_wheel[1].target_rot_angle << ", "
+                      << controller.m_steer_wheel[1].target_forward_vel;
 
-                PLOGD << "get command:[rotate_angle,forward_vel]\n" << controller.m_steer_wheel[0].command_rotate_angle << ", "
+                PLOGD << "get command:[rotate_angle,forward_vel]\n" << controller.m_steer_wheel[0].command_rotate_angle
+                      << ", "
                       << controller.m_steer_wheel[0].command_forward_vel << ", "
                       << controller.m_steer_wheel[1].command_rotate_angle << ", "
                       << controller.m_steer_wheel[1].command_forward_vel;
 
-                PLOGD << "get interpolate command:[rotate_angle,forward_vel]\n" << controller.m_steer_wheel[0].getCommandRotateAngle() << ", "
+                PLOGD << "get interpolate command:[rotate_angle,forward_vel]\n"
+                      << controller.m_steer_wheel[0].getCommandRotateAngle() << ", "
                       << controller.m_steer_wheel[0].getCommandForwardVel() << ", "
                       << controller.m_steer_wheel[1].getCommandRotateAngle() << ", "
                       << controller.m_steer_wheel[1].getCommandForwardVel();
@@ -2533,16 +2665,19 @@ int test_tec(int argc, char** argv) {
                                   && std::abs(recv_cmd_vel_msg.angular.z) < 0.001;
 
                 bool is_stopped = std::abs(odom.twist.twist.linear.x) < 0.001
-                        && std::abs(odom.twist.twist.linear.y) < 0.001
-                        && std::abs(odom.twist.twist.angular.z) < 0.001;
+                                  && std::abs(odom.twist.twist.linear.y) < 0.001
+                                  && std::abs(odom.twist.twist.angular.z) < 0.001;
 
 
                 // can send
 
-                control_wheel(true,is_stop_command && is_stopped, controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle() ,controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle() );
+                control_wheel(true, is_stop_command && is_stopped, controller.m_steer_wheel[0].getCommandForwardVel(),
+                              controller.m_steer_wheel[0].getCommandRotateAngle(),
+                              controller.m_steer_wheel[1].getCommandForwardVel(),
+                              controller.m_steer_wheel[1].getCommandRotateAngle());
 
                 return true;
-            }else{
+            } else {
                 PLOGD << "driver not ready, cmd_vel reset";
                 motion_planner.reset();
                 controller.bypass();
@@ -2556,38 +2691,42 @@ int test_tec(int argc, char** argv) {
                 controller.m_steer_wheel[0].getCommandForwardVel() = 0.0f;
                 controller.m_steer_wheel[1].getCommandForwardVel() = 0.0f;
 
-                control_wheel(false,true, controller.m_steer_wheel[0].getCommandForwardVel(),controller.m_steer_wheel[0].getCommandRotateAngle() ,controller.m_steer_wheel[1].getCommandForwardVel(),controller.m_steer_wheel[1].getCommandRotateAngle() );
+                control_wheel(false, true, controller.m_steer_wheel[0].getCommandForwardVel(),
+                              controller.m_steer_wheel[0].getCommandRotateAngle(),
+                              controller.m_steer_wheel[1].getCommandForwardVel(),
+                              controller.m_steer_wheel[1].getCommandRotateAngle());
 
                 return true;
 
             }
 
 
-
             return true;
-        }, 5*1000,1);
+        }, 5 * 1000, 1);
 
-    }else{
+    } else {
         PLOGD << "add fix command";
 
-        taskManager.addTask([&controller, &control_wheel,&command_array,&mqttMessageManager,&mqtt_sub_topic,&lua_cb]{
+        taskManager.addTask(
+                [&controller, &control_wheel, &command_array, &mqttMessageManager, &mqtt_sub_topic, &lua_cb] {
 
-            mqttMessageManager.recv_message(mqtt_sub_topic.c_str(),10,0.01, lua_cb);
+                    mqttMessageManager.recv_message(mqtt_sub_topic.c_str(), 10, 0.01, lua_cb);
 
-            command_array[1] = std::max(std::min(1.918888889f, command_array[1]),-1.918888889f);
-            command_array[3] = std::max(std::min(1.918888889f, command_array[3]),-1.918888889f);
+                    command_array[1] = std::max(std::min(1.918888889f, command_array[1]), -1.918888889f);
+                    command_array[3] = std::max(std::min(1.918888889f, command_array[3]), -1.918888889f);
 
-            controller.m_steer_wheel[0].getCommandForwardVel() = command_array[0];
-            controller.m_steer_wheel[0].getCommandForwardVel() = command_array[1];
-            controller.m_steer_wheel[1].getCommandForwardVel() = command_array[2];
-            controller.m_steer_wheel[1].getCommandForwardVel() = command_array[3];
+                    controller.m_steer_wheel[0].getCommandForwardVel() = command_array[0];
+                    controller.m_steer_wheel[0].getCommandForwardVel() = command_array[1];
+                    controller.m_steer_wheel[1].getCommandForwardVel() = command_array[2];
+                    controller.m_steer_wheel[1].getCommandForwardVel() = command_array[3];
 
-            PLOGD << "send fix command: " << command_array[0] << ", " << command_array[1] << ", " <<command_array[2] << ", " << command_array[3];
+                    PLOGD << "send fix command: " << command_array[0] << ", " << command_array[1] << ", "
+                          << command_array[2] << ", " << command_array[3];
 
-            control_wheel(true, false, command_array[0],command_array[1],command_array[2],command_array[3] );
+                    control_wheel(true, false, command_array[0], command_array[1], command_array[2], command_array[3]);
 
-            return true;
-        } ,100*1000,0);
+                    return true;
+                }, 100 * 1000, 0);
 
     }
 
@@ -2601,17 +2740,15 @@ int test_tec(int argc, char** argv) {
     // driver initializer
 
     PLOGD << "start loop, " << program_run;
-    while (program_run && rosMessageManager.is_running()){
+    while (program_run && rosMessageManager.is_running()) {
 
         taskManager.call();
-
 
 
     }
     PLOGD << "end loop, " << program_run;
 
-    control_wheel(false,true, 0.0, 0.0 , 0.0, 0.0);
-
+    control_wheel(false, true, 0.0, 0.0, 0.0, 0.0);
 
 
     mqttMessageManager.stop();
@@ -2625,8 +2762,8 @@ int test_tec(int argc, char** argv) {
 }
 
 
-int main(int argc, char** argv){
-    test_tec(argc,argv);
+int main(int argc, char **argv) {
+    test_tec(argc, argv);
 
     return 0;
 }

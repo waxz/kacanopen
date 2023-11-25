@@ -1,0 +1,61 @@
+{
+
+  "stable_pose_dist_tolerance" : 0.02,
+  "stable_pose_angle_tolerance" : 0.01,
+
+  "speed_up_acc": 0.5,
+
+  "speed_down_acc": 0.13,
+
+  "curve_path_angle" : 0.2,
+  "curve_path_window" : 5,
+  "curve_path_speed_ratio" : 0.5,
+  "start_pose_dist" : 1.0,
+  "first_rotate_acc": 0.1,
+  "first_rotate_angle_tolerance": 0.05,
+  "first_rotate_angle_p": 0.1,
+  "first_rotate_vel": 0.1,
+
+  "first_track_dist": 0.3,
+  "max_track_dist" : 0.4,
+
+  "first_rotate_vel_min" : 0.02,
+
+  "pursuit_path_forward_acc" : 0.3,
+  "pursuit_path_interpolate_step" : 0.5,
+  "pursuit_path_angle_converge" : 0.05,
+  "pursuit_path_forward_vel": 2.5,
+  "pursuit_path_rotate_vel_angle_p": 0.5,
+  "pursuit_path_rotate_vel_vel_p" : 0.005,
+  "pursuit_path_angle_rot_vel_max" : 0.01,
+
+
+  "pursuit_path_width" : 0.1,
+  "pursuit_path_width_direction_adjust" : 0.0,
+  "off_path_dist" : 0.3,
+  "steer_rotate_vel" : 0.3,
+  "curve_interpolate_dist" : 0.5,
+  "follow_dist_min" : 0.2,
+  "follow_dist_max" : 0.5,
+
+
+  "pursuit_goal_dist" : 0.5,
+  "pursuit_goal_forward_vel": 0.1,
+
+  "pursuit_goal_angle_pid_p": 0.0,
+  "pursuit_direct_goal_dist": 0.8,
+
+  "pursuit_final_goal_dist": 0.3,
+  "pursuit_goal_angle_rot_vel_max" : 0.001,
+  "pursuit_goal_final_angle_pid_p": 0.0,
+  "pursuit_goal_final_forward_vel": 0.015,
+  "pursuit_goal_reach_tolerance": 0.02,
+
+  "pursuit_goal_forward_vel_pid_p" : 0.05,
+  "pursuit_goal_forward_vel_min" : 0.15,
+  "pursuit_goal_forward_vel_max" : 0.2,
+
+  "pursuit_goal_final_forward_vel_pid_p" : 0.1,
+  "pursuit_goal_final_forward_vel_min" : 0.03,
+  "pursuit_goal_final_forward_vel_max" : 0.04
+}

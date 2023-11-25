@@ -286,6 +286,7 @@ namespace control{
         float m_path_node_id_interpolate = 0.0;
         size_t m_closest_path_node_id = 0;
 
+        std::array<float,3> m_report_error;
 
         void reset();
 

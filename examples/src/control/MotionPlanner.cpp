@@ -1354,8 +1354,7 @@ namespace control{
 //        return createLocalPath_v2();
 //    }
 //
-    bool DoubleSteerMotionPlanner::createLocalPath(){
-        return createLocalPath_v1();
+    bool DoubleSteerMotionPlanner::createLocalPath_v1(){
 
         // time
         common::Time now = common::FromUnixNow();
@@ -1934,6 +1933,9 @@ namespace control{
         float base_to_target_yaw_init = std::atan2(local_path[0].y() - actual_pose_y, local_path[0].x() - actual_pose_x );
         float target_path_yaw_init = angle_normalise_zero(m_track_path_info[m_closest_path_node_id + 1 ].direction) ;
 
+
+        auto actual_in_closest = m_track_path_info[m_closest_path_node_id].pose.inverse()*actual_pose;
+
 #if 0
         size_t valid_num = 0;
 
@@ -1999,17 +2001,28 @@ namespace control{
             }
 
             int best_weight = 3;
-            float goal_y_sum = best_weight*local_path[best_id].y(), goal_x_sum = best_weight*local_path[best_id].x();
-            for(size_t i = best_id+1;i <pose_num;i++ ){
+
+            int init_weight = 1;
+
+            if(std::abs(actual_in_closest.y()) > 0.03){
+                init_weight = 2;
+            }
+
+            float goal_y_sum = best_weight*local_path[best_id].y() + init_weight*local_path[0].y() ;
+            float goal_x_sum = best_weight*local_path[best_id].x() + init_weight*local_path[0].x() ;
+
+
+            for(size_t i = 0 ;i <pose_num;i++ ){
                 goal_y_sum += local_path[i].y();
                 goal_x_sum += local_path[i].x();
             }
-            goal_y_sum/=float(pose_num - best_id + best_weight - 1);
-            goal_x_sum/=float(pose_num - best_id + best_weight - 1);
-
+//            goal_y_sum/=float(pose_num - best_id + best_weight - 1 + init_weight - 1);
+//            goal_x_sum/=float(pose_num - best_id + best_weight - 1 + init_weight - 1);
+            goal_y_sum/=float(pose_num  + best_weight  + init_weight );
+            goal_x_sum/=float(pose_num  + best_weight  + init_weight );
 
             float temp_forward_angle = std::atan2(goal_y_sum - actual_pose_y, goal_x_sum - actual_pose_x );
-            m_forward_angle = temp_forward_angle;
+            m_forward_angle = angle_normalise(temp_forward_angle, actual_pose_yaw) - actual_pose_yaw;
 
         }
 
@@ -2026,8 +2039,8 @@ namespace control{
         return true;
     }
 
-    bool DoubleSteerMotionPlanner::createLocalPath_v1() {
-
+    bool DoubleSteerMotionPlanner::createLocalPath() {
+        m_report_error.fill(0.0);
 
         int log_level = 4;
 
@@ -2180,8 +2193,14 @@ namespace control{
 //            PLOG(plog::Severity(log_level))  << "m_closest_path_node_id: " << m_closest_path_node_id;
 
         }
-        float closest_node_offset_x = actual_in_closest.y();
+        float closest_node_offset_x = actual_in_closest.x();
         float closest_node_offset_y = actual_in_closest.y();
+
+        auto pose_diff = global_path[m_closest_path_node_id].inverse()*actual_pose;
+
+        m_report_error[0] = closest_node_offset_x;
+        m_report_error[1] = closest_node_offset_y;
+        m_report_error[2] = pose_diff.yaw();
 
         // search track node
 
@@ -2789,7 +2808,9 @@ namespace control{
         float goal_yaw = goal.yaw();
 
         transform::Transform2d actual_pose_in_node = m_track_path_info[node_id].pose.inverse()*actual_pose;
-
+        m_report_error[0] = actual_pose_in_node.x();
+        m_report_error[1] = actual_pose_in_node.y();
+        m_report_error[2] = angle_normalise(goal_yaw, actual_pose_yaw) - actual_pose_yaw;
 
         m_forward_diff = std::sqrt( transform::diff2(actual_pose,goal )  );
 

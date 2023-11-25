@@ -1,0 +1,13 @@
+[{ "max_forward_vel": 3.5,"max_forward_acc":10.0, "max_rotate_angle": 1.9  , "max_rotate_vel": 10.0,"min_forward_vel": 0.05,
+  "use_rot_angle_abs": false, "predict_control_s": 0.02, "action_timeout_s": 5.2, "forward_reach_thresh" : 0.02, "rotate_reach_thresh" : 0.02,
+  "forward_speed_k":-0.000872664626,
+  "mount_x": 1.219,"mount_y":-0.77,
+  "rot_angle_b":0.00,"rot_angle_k":-3.301373038e-06,
+  "rot_angle_abs_k": -1.51183e-4, "rot_angle_abs_b": 2.052},
+
+  {"max_forward_vel": 3.5, "max_forward_acc":10.0,"max_rotate_angle": 1.9  , "max_rotate_vel": 10.0,"min_forward_vel": 0.05,
+    "use_rot_angle_abs": false,"predict_control_s": 0.02, "action_timeout_s": 5.2, "forward_reach_thresh" : 0.02, "rotate_reach_thresh" : 0.02,
+    "forward_speed_k":0.000872664626,
+    "mount_x":-1.219,"mount_y":0.77,
+    "rot_angle_b":0.00,"rot_angle_k":-3.291373038e-06,
+    "rot_angle_abs_k": -1.51183e-4, "rot_angle_abs_b":  1.94}]
