@@ -425,71 +425,113 @@ namespace control{
         command_linear_y = 0.0;
         command_angular_z = 0.0;
 
-        float angle_diff = target - angle_normalise(actual , target) ;
+//        float angle_diff = target - angle_normalise(actual , target) ;
+        float angle_diff = angle_normalise(target , actual) - actual ;
+        angle_diff = angle_normal(angle_diff);
         std::cout << "angle_diff: " << angle_diff<< "\n";
+        if( (angle_diff > m_planner_config.first_rotate_angle_tolerance &&  actual_angular_z<-0.001)
+        || ((angle_diff < -m_planner_config.first_rotate_angle_tolerance &&  actual_angular_z >0.001)) ){
+            std::cout << "stop first" << std::endl;
+            command_angular_z = 0.0;
+            return false;
+        }
 
+        if(m_rotate_init_angle_diff > 0.0f && (angle_diff) < m_planner_config.first_rotate_angle_tolerance ){
+            command_angular_z = 0.0f;
+            return std::abs(actual_angular_z) < 0.001;
+        }
+        if(m_rotate_init_angle_diff < 0.0f && (angle_diff) >- m_planner_config.first_rotate_angle_tolerance ){
+            command_angular_z = 0.0f;
+            return std::abs(actual_angular_z) < 0.001;
+        }
+
+#if 0
+        {
+            float min_rotate_vel = copysign(m_planner_config.first_rotate_vel_min, angle_diff) ;//angle_diff > 0.0 ?  m_planner_config.first_rotate_vel_min:- m_planner_config.first_rotate_vel_min;
+            float max_rotate_vel =  copysign( m_max_base_rotate_vel, angle_diff) ;//angle_diff > 0.0 ? m_max_base_rotate_vel:-m_max_base_rotate_vel;
+            float rotate_acc = copysign(m_planner_config.first_rotate_acc, angle_diff) ;// angle_diff > 0.0 ? m_planner_config.first_rotate_acc:-m_planner_config.first_rotate_acc;
+
+            float update_s  = 0.01;
+            common::Time now = common::FromUnixNow();
+            interpolate_time_step_1 = now;
+
+            update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time_step_0)*1e-6;
+            update_s = std::min(update_s, 0.02f);
+            interpolate_time_step_0 = now;
+
+            std::cout << "m_rotate_init_angle_diff: " << m_rotate_init_angle_diff<< "\n";
+            std::cout << "m_planner_config.first_rotate_angle_tolerance: " << m_planner_config.first_rotate_angle_tolerance<< "\n";
+
+            float command_feedback = min_rotate_vel + angle_diff* m_planner_config.first_rotate_angle_p ;
+            if(m_rotate_init_angle_diff > 0.0f){
+
+                if( (angle_diff) < m_planner_config.first_rotate_angle_tolerance ){
+                    command_angular_z = 0.0f;
+                    return std::abs(actual_angular_z) < 0.001;
+                }else{
+
+                    command_angular_z =  copysign(actual_angular_z, angle_diff) + update_s*rotate_acc;
+//            command_angular_z =command_angular_z > 0.0 ?  std::min(command_angular_z, max_rotate_vel):std::max(command_angular_z, max_rotate_vel);
+                }
+
+            }else{
+
+                //predict_slop_stop_angle - angle_diff
+                if( ( angle_diff) >- m_planner_config.first_rotate_angle_tolerance ){
+                    command_angular_z = 0.0f;
+                    return std::abs(actual_angular_z) < 0.001;
+
+                }else{
+                    command_angular_z = copysign(actual_angular_z, angle_diff) + update_s*rotate_acc;
+//            command_angular_z =command_angular_z > 0.0 ?  std::min(command_angular_z, max_rotate_vel):std::max(command_angular_z, max_rotate_vel);
+                }
+
+            }
+
+            std::cout << "command_angular_z orogin: " << command_angular_z<< "\n";
+            std::cout << "m_planner_config.first_rotate_vel: " << m_planner_config.first_rotate_vel<< "\n";
+
+            if(command_angular_z > 0.0){
+                command_angular_z = std::max(std::min(std::min(command_feedback,command_angular_z ), m_planner_config.first_rotate_vel), m_planner_config.first_rotate_vel_min ) ;
+            }else{
+                command_angular_z = std::min(std::max(std::max(command_feedback,command_angular_z ), - m_planner_config.first_rotate_vel), -m_planner_config.first_rotate_vel_min);
+
+            }
+        }
+#endif
+
+
+        {
+            float update_s  = 0.01;
+            common::Time now = common::FromUnixNow();
+            interpolate_time_step_1 = now;
+
+            update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time_step_0)*1e-6;
+            update_s = std::min(update_s, 0.02f);
+            interpolate_time_step_0 = now;
+
+            float command_angular_z_abs = std::abs(command_angular_z);
+
+            float min_rotate_vel = copysign(m_planner_config.first_rotate_vel_min, angle_diff);
+            float rotate_acc = copysign(m_planner_config.first_rotate_acc, angle_diff) ;// angle_diff > 0.0 ? m_planner_config.first_rotate_acc:-m_planner_config.first_rotate_acc;
+
+
+            float command_feedback = min_rotate_vel + angle_diff* m_planner_config.first_rotate_angle_p ;
+
+            float command_feedback_abs = std::abs(command_feedback);
+
+            float command_speed_up = copysign(actual_angular_z, angle_diff) + update_s*rotate_acc;
+            float command_speed_up_abs = std::abs(command_speed_up);
+
+
+            command_angular_z = std::min(std::min(std::max(m_planner_config.first_rotate_vel_min, command_speed_up_abs), command_feedback_abs), m_planner_config.first_rotate_vel)   ;
+        }
 
         //
-        float min_rotate_vel = angle_diff > 0.0 ?  m_planner_config.first_rotate_vel_min:- m_planner_config.first_rotate_vel_min;
-        float max_rotate_vel = angle_diff > 0.0 ? m_max_base_rotate_vel:-m_max_base_rotate_vel;
-        float rotate_acc = angle_diff > 0.0 ? m_planner_config.first_rotate_acc:-m_planner_config.first_rotate_acc;
-        float predict_slop_stop_angle = 0.5f*(actual_angular_z + min_rotate_vel)*std::abs(actual_angular_z - min_rotate_vel)/m_max_base_rotate_acc;
 
-        float update_s  = 0.01;
-        common::Time now = common::FromUnixNow();
-        interpolate_time_step_1 = now;
-
-        update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time_step_0)*1e-6;
-        update_s = std::min(update_s, 0.02f);
-        interpolate_time_step_0 = now;
-
-        std::cout << "m_rotate_init_angle_diff: " << m_rotate_init_angle_diff<< "\n";
-        std::cout << "m_planner_config.first_rotate_angle_tolerance: " << m_planner_config.first_rotate_angle_tolerance<< "\n";
-
-        float command_feedback = min_rotate_vel + angle_diff* m_planner_config.first_rotate_angle_p ;
-        if(m_rotate_init_angle_diff > 0.0f){
-
-            if( (angle_diff) < m_planner_config.first_rotate_angle_tolerance ){
-                command_angular_z = 0.0f;
-                return std::abs(actual_angular_z) < 0.001;
-            }else{
-                command_angular_z = actual_angular_z + update_s*rotate_acc;
-//            command_angular_z =command_angular_z > 0.0 ?  std::min(command_angular_z, max_rotate_vel):std::max(command_angular_z, max_rotate_vel);
-            }
-
-        }else{
-
-            //predict_slop_stop_angle - angle_diff
-            if( ( angle_diff) >- m_planner_config.first_rotate_angle_tolerance ){
-                command_angular_z = 0.0f;
-                return std::abs(actual_angular_z) < 0.001;
-
-            }else{
-                command_angular_z = actual_angular_z + update_s*rotate_acc;
-//            command_angular_z =command_angular_z > 0.0 ?  std::min(command_angular_z, max_rotate_vel):std::max(command_angular_z, max_rotate_vel);
-            }
-
-        }
-
-        std::cout << "command_angular_z orogin: " << command_angular_z<< "\n";
-        std::cout << "m_planner_config.first_rotate_vel: " << m_planner_config.first_rotate_vel<< "\n";
-
-        if(command_angular_z > 0.0){
-            command_angular_z = std::max(std::min(std::min(command_feedback,command_angular_z ), m_planner_config.first_rotate_vel), m_planner_config.first_rotate_vel_min ) ;
-        }else{
-            command_angular_z = std::min(std::max(std::max(command_feedback,command_angular_z ), - m_planner_config.first_rotate_vel), -m_planner_config.first_rotate_vel_min);
-
-        }
+        command_angular_z = copysign(command_angular_z, angle_diff);
         std::cout << "actual_angular_z: " << actual_angular_z<< "\n";
-        std::cout << "min_rotate_vel: " << min_rotate_vel<< "\n";
-        std::cout << "update_s: " << update_s<< "\n";
-        std::cout << "rotate_acc: " << rotate_acc<< "\n";
-
-
-        std::cout << "actual_angular_z: " << actual_angular_z<< "\n";
-        std::cout << "command_feedback: " << command_feedback<< "\n";
         std::cout << "command_angular_z: " << command_angular_z<< "\n";
-
         return false;
     }
 
@@ -506,6 +548,13 @@ namespace control{
 
         auto& global_path = m_global_path.value;
 
+        float odom_twist_linear_x = m_actual_odom.value.twist.twist.linear.x;
+        float odom_twist_linear_y = m_actual_odom.value.twist.twist.linear.y;
+        float odom_twist_angular_z = m_actual_odom.value.twist.twist.angular.z;
+        float odom_twist_linear = std::sqrt(odom_twist_linear_x*odom_twist_linear_x + odom_twist_linear_y*odom_twist_linear_y);
+
+        bool odom_is_stopped = odom_twist_angular_z < 0.01 && odom_twist_linear < 0.01;
+
         if(m_task_state == TaskState::running_rotate_init){
 
             m_command.setCmd(0.0f,0.0f,0.0f);
@@ -519,6 +568,7 @@ namespace control{
             std::cout << "running_rotate_init" << std::endl;
 
             float angle_diff = angle_normalise(global_path[0].yaw(), m_actual_pose.value.yaw()) - m_actual_pose.value.yaw();
+            angle_diff = angle_normal(angle_diff);
 
             float dist_diff = transform::diff2(m_actual_pose.value, global_path.back());
 
@@ -526,7 +576,7 @@ namespace control{
             interpolate_time_step_0 = interpolate_time;
             interpolate_time_step_1 = interpolate_time;
 
-            {
+            if(odom_is_stopped){
 
                 if(std::abs(angle_diff )< m_planner_config.first_rotate_angle_tolerance){
                     m_task_state = TaskState::finished;
@@ -546,6 +596,8 @@ namespace control{
             bool ok = rotate(m_actual_pose.value.yaw(), global_path[0].yaw());
             if(ok){
                 float angle_diff = angle_normalise(global_path[0].yaw(), m_actual_pose.value.yaw()) - m_actual_pose.value.yaw();
+                angle_diff = angle_normal(angle_diff);
+
                 interpolate_time = common::FromUnixNow();
                 interpolate_time_step_0 = interpolate_time;
                 interpolate_time_step_1 = interpolate_time;
@@ -556,7 +608,7 @@ namespace control{
 
                 }else{
                     m_rotate_init_angle_diff =angle_diff;
-                    m_task_state = TaskState::running_rotate;
+                    m_task_state = TaskState::running_rotate_init;
 
                 }
 
@@ -578,6 +630,7 @@ namespace control{
             std::cout << "running_init" << std::endl;
 
             float angle_diff = angle_normalise(global_path[0].yaw(), m_actual_pose.value.yaw()) - m_actual_pose.value.yaw();
+            angle_diff = angle_normal(angle_diff);
 
             float dist_diff = transform::diff2(m_actual_pose.value, global_path.back());
 
@@ -585,17 +638,20 @@ namespace control{
             interpolate_time_step_0 = interpolate_time;
             interpolate_time_step_1 = interpolate_time;
 
-            if(std::sqrt(dist_diff) < m_planner_config.pursuit_goal_dist ){
-                m_task_state = TaskState::running_adjust_prepare;
-            }else{
-
-                if(std::abs(angle_diff )< m_planner_config.first_rotate_angle_tolerance){
+            if(odom_is_stopped){
+                if(std::sqrt(dist_diff) < m_planner_config.pursuit_goal_dist ){
                     m_task_state = TaskState::running_adjust_prepare;
                 }else{
-                    m_rotate_init_angle_diff =angle_diff;
-                    m_task_state = TaskState::running_adjust_rotate;
+
+                    if(std::abs(angle_diff )< m_planner_config.first_rotate_angle_tolerance){
+                        m_task_state = TaskState::running_adjust_prepare;
+                    }else{
+                        m_rotate_init_angle_diff =angle_diff;
+                        m_task_state = TaskState::running_adjust_rotate;
+                    }
                 }
             }
+
             return ;
 
         }
@@ -606,6 +662,7 @@ namespace control{
             bool ok = rotate(m_actual_pose.value.yaw(), global_path[0].yaw());
             if(ok){
                 float angle_diff = angle_normalise(global_path[0].yaw(), m_actual_pose.value.yaw()) - m_actual_pose.value.yaw();
+                angle_diff = angle_normal(angle_diff);
                 interpolate_time = common::FromUnixNow();
                 interpolate_time_step_0 = interpolate_time;
                 interpolate_time_step_1 = interpolate_time;
@@ -616,7 +673,7 @@ namespace control{
 
                 }else{
                     m_rotate_init_angle_diff =angle_diff;
-                    m_task_state = TaskState::running_adjust_rotate;
+                    m_task_state = TaskState::running_init;
 
                 }
 
@@ -791,11 +848,11 @@ namespace control{
         float base_start_yaw_map = global_path[0].yaw();
         float wheel_start_yaw_base = path_start_yaw_map - base_start_yaw_map;
 
-        wheel_start_yaw_base = angle_normalise_zero(wheel_start_yaw_base);
+        wheel_start_yaw_base = angle_normal(wheel_start_yaw_base);
         float init_wheel_yaw_base[2] = {0.0,-M_PIf32};
 //        init_wheel_yaw_base[1] = (wheel_start_yaw_base > 0.0) ? wheel_start_yaw_base- M_PIf32 :wheel_start_yaw_base + M_PIf32;
-//        init_wheel_yaw_base[0] = angle_normalise_zero(init_wheel_yaw_base[0]);
-//        init_wheel_yaw_base[1] = angle_normalise_zero(init_wheel_yaw_base[1]);
+//        init_wheel_yaw_base[0] = angle_normal(init_wheel_yaw_base[0]);
+//        init_wheel_yaw_base[1] = angle_normal(init_wheel_yaw_base[1]);
 
         bool init_wheel_yaw_ok[2] = {true, true};
 
@@ -811,8 +868,8 @@ namespace control{
 
             float base_yaw = global_path[i].yaw();
 
-            init_wheel_yaw_ok[0] = init_wheel_yaw_ok[0] && std::abs(angle_normalise_zero(init_wheel_yaw_base[0] + path_yaw - base_yaw)) < m_max_wheel_rotate_angle;
-            init_wheel_yaw_ok[1] = init_wheel_yaw_ok[1] && std::abs(angle_normalise_zero(init_wheel_yaw_base[1] + path_yaw - base_yaw)) < m_max_wheel_rotate_angle;
+            init_wheel_yaw_ok[0] = init_wheel_yaw_ok[0] && std::abs(angle_normal(init_wheel_yaw_base[0] + path_yaw - base_yaw)) < m_max_wheel_rotate_angle;
+            init_wheel_yaw_ok[1] = init_wheel_yaw_ok[1] && std::abs(angle_normal(init_wheel_yaw_base[1] + path_yaw - base_yaw)) < m_max_wheel_rotate_angle;
         }
         PLOGD << "init_wheel_yaw_ok: " << init_wheel_yaw_ok[0] << ", " << init_wheel_yaw_ok[1];
 
@@ -1218,8 +1275,8 @@ namespace control{
             bool check_wheel_zero_ok[2] = {true, true};
 
             for(size_t i = 0 ; i < pose_num  ;i++){
-                check_wheel_zero_ok[0] = check_wheel_zero_ok[0] && std::abs(angle_normalise_zero(check_wheel_zero_angle[0] + m_track_path_info[i].pose.yaw() - global_path[i].yaw())) < m_max_wheel_rotate_angle;
-                check_wheel_zero_ok[1] = check_wheel_zero_ok[1] && std::abs(angle_normalise_zero(check_wheel_zero_angle[1] + m_track_path_info[i].pose.yaw() - global_path[i].yaw())) < m_max_wheel_rotate_angle;
+                check_wheel_zero_ok[0] = check_wheel_zero_ok[0] && std::abs(angle_normal(check_wheel_zero_angle[0] + m_track_path_info[i].pose.yaw() - global_path[i].yaw())) < m_max_wheel_rotate_angle;
+                check_wheel_zero_ok[1] = check_wheel_zero_ok[1] && std::abs(angle_normal(check_wheel_zero_angle[1] + m_track_path_info[i].pose.yaw() - global_path[i].yaw())) < m_max_wheel_rotate_angle;
             }
             PLOG(plog::Severity(log_level)) << "check_wheel_zero_ok: " << check_wheel_zero_ok[0] << ", " << check_wheel_zero_ok[1];
 
@@ -1232,7 +1289,7 @@ namespace control{
                 float init_wheel_angle[2] = {0.0f,0.0f};
 
                 for(size_t i = 0 ; i  < 2;i++){
-                    init_wheel_angle[i] = angle_normalise_zero(check_wheel_zero_angle[i] + m_track_path_info[0].pose.yaw() - global_path[0].yaw());
+                    init_wheel_angle[i] = angle_normal(check_wheel_zero_angle[i] + m_track_path_info[0].pose.yaw() - global_path[0].yaw());
                     angle_diff[i] = check_wheel_zero_ok[i] ? std::abs( init_wheel_angle[i] - m_wheel_state.value[1]) : 1000.0f;
                 }
 
@@ -1386,9 +1443,12 @@ namespace control{
         m_local_target.time = common::FromUnixNow();
 
 
-        transform::Transform2d odom_twist(m_actual_odom.value.twist.twist.linear.x,m_actual_odom.value.twist.twist.linear.y);
-        odom_twist = m_map_odom_record*odom_twist;
-        float odom_twist_vel = std::sqrt(odom_twist.x()*odom_twist.x() + odom_twist.y()*odom_twist.y());
+        float odom_twist_x = m_actual_odom.value.twist.twist.linear.x;
+        float odom_twist_y = m_actual_odom.value.twist.twist.linear.y;
+
+//        transform::Transform2d odom_twist(m_actual_odom.value.twist.twist.linear.x,m_actual_odom.value.twist.twist.linear.y);
+//        odom_twist = m_map_odom_record*odom_twist;
+        float odom_twist_vel = std::sqrt(odom_twist_x*odom_twist_x + odom_twist_y*odom_twist_y);
 
 
         float odom_forward_dist = odom_twist_vel * relative_update_s;
@@ -1535,11 +1595,11 @@ namespace control{
             float wheel_yaw = angle_normalise(path_yaw_map, actual_yaw) - actual_yaw;
 
             if(m_start_wheel_angle > 0.1){
-                m_prefer_steer_angle =angle_normalise_zero(wheel_yaw) ;
+                m_prefer_steer_angle =angle_normal(wheel_yaw) ;
             }else if(m_start_wheel_angle < -0.1){
-                m_prefer_steer_angle = angle_normalise_zero(wheel_yaw + M_PIf32);
+                m_prefer_steer_angle = angle_normal(wheel_yaw + M_PIf32);
             }else{
-                m_prefer_steer_angle =angle_normalise_zero(wheel_yaw) ;
+                m_prefer_steer_angle =angle_normal(wheel_yaw) ;
             }
             m_local_target.value.set(actual_pose.x() + 0.1*std::cos(path_yaw_map),actual_pose.y() + 0.1*std::sin(path_yaw_map), actual_yaw) ;
 
@@ -1931,7 +1991,7 @@ namespace control{
         float base_to_target_yaw_sum = 0.0;
         float target_path_yaw_sum = 0.0;
         float base_to_target_yaw_init = std::atan2(local_path[0].y() - actual_pose_y, local_path[0].x() - actual_pose_x );
-        float target_path_yaw_init = angle_normalise_zero(m_track_path_info[m_closest_path_node_id + 1 ].direction) ;
+        float target_path_yaw_init = angle_normal(m_track_path_info[m_closest_path_node_id + 1 ].direction) ;
 
 
         auto actual_in_closest = m_track_path_info[m_closest_path_node_id].pose.inverse()*actual_pose;
@@ -1961,7 +2021,7 @@ namespace control{
         target_path_yaw_sum /= float (valid_num);
 
         float path_direction_weight = 0.1f;
-        float base_to_goal_yaw = angle_normalise_zero(path_direction_weight*   angle_normalise(target_path_yaw_sum , base_to_target_yaw_sum) + (1.0f - path_direction_weight)* base_to_target_yaw_sum    )   ;
+        float base_to_goal_yaw = angle_normal(path_direction_weight*   angle_normalise(target_path_yaw_sum , base_to_target_yaw_sum) + (1.0f - path_direction_weight)* base_to_target_yaw_sum    )   ;
         m_forward_angle = angle_normalise(base_to_goal_yaw, actual_pose_yaw) - actual_pose_yaw;
 
 #endif
@@ -2051,7 +2111,7 @@ namespace control{
 //        float abs_update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time)*1e-6;
 
         float update_s = common::ToMicroSeconds(interpolate_time_step_1 - interpolate_time_step_0)*1e-6;
-        update_s = std::min(update_s, 0.02f);
+        update_s = std::min(update_s, 0.05f);
 
         interpolate_time_step_0 = now;
 
@@ -2086,10 +2146,12 @@ namespace control{
         m_local_target.time = common::FromUnixNow();
 
 
-        transform::Transform2d odom_twist(m_actual_odom.value.twist.twist.linear.x,m_actual_odom.value.twist.twist.linear.y);
-        odom_twist = m_map_odom_record*odom_twist;
-        float odom_twist_vel = std::sqrt(odom_twist.x()*odom_twist.x() + odom_twist.y()*odom_twist.y());
+        float odom_twist_x = m_actual_odom.value.twist.twist.linear.x;
+        float odom_twist_y = m_actual_odom.value.twist.twist.linear.y;
 
+//        transform::Transform2d odom_twist(m_actual_odom.value.twist.twist.linear.x,m_actual_odom.value.twist.twist.linear.y);
+//        odom_twist = m_map_odom_record*odom_twist;
+        float odom_twist_vel = std::sqrt(odom_twist_x*odom_twist_x + odom_twist_y*odom_twist_y);
 
         float odom_forward_dist = odom_twist_vel * update_s;
         PLOGD << "odom_twist_vel: " << odom_twist_vel;
@@ -2291,7 +2353,7 @@ namespace control{
 
             if(m_planner_state == PlannerState::follow_goal){
                 size_t target_id = pose_num-1;
-
+                m_closest_path_node_id = target_id;
                 if(odom_twist_vel < 0.04){
                     m_rotate_vel = 0.0f;
                     m_rotate_diff = 0.0f;
@@ -2312,7 +2374,7 @@ namespace control{
                 size_t target_id = segment_end_id;
 
 
-                float base_to_goal_yaw = angle_normalise_zero(m_track_path_info[target_id].direction);
+                float base_to_goal_yaw = angle_normal(m_track_path_info[target_id].direction);
                 float goal_yaw = global_path[target_id].yaw();
 
                 m_rotate_diff = angle_normalise(goal_yaw, actual_pose_yaw) - actual_pose_yaw;
@@ -2358,11 +2420,13 @@ namespace control{
             }
 
 
+            if(m_planner_state != PlannerState::follow_goal)
             {
                 m_forward_vel = m_track_path_info[m_closest_path_node_id].forward_vel;
 
                 // smooth speed up
                 float increase_forward_vel =  odom_twist_vel +   update_s * m_planner_config.speed_up_acc;
+//                std::cout << "increase_forward_vel: " << increase_forward_vel << ", speed_up_acc: " << m_planner_config.speed_up_acc << ", update_s: " << update_s << ", odom_twist_vel: " << odom_twist_vel << "\n";
 
                 m_forward_vel = std::min(m_forward_vel,increase_forward_vel );
             }
@@ -2581,6 +2645,10 @@ namespace control{
         {
 
             transform::Transform2d actual_pose_in_goal = m_track_path_info.back().pose.inverse() * actual_pose;
+            m_report_error[0] = actual_pose_in_goal.x();
+            m_report_error[1] = actual_pose_in_goal.y();
+            m_report_error[2] = global_path.back().yaw() -actual_pose.yaw()  ;
+
             if(actual_pose_in_goal.x() > -m_planner_config.pursuit_goal_reach_tolerance
                     ){
                 command_linear_x = 0.0;

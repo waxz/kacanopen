@@ -313,6 +313,8 @@ constexpr auto ControllerConfig_properties = std::make_tuple(
         common::property(&ControllerConfig::min_forward_vel, "min_forward_vel"),
 
         common::property(&ControllerConfig::action_timeout_s, "action_timeout_s"),
+        common::property(&ControllerConfig::comm_timeout_s, "comm_timeout_s"),
+
         common::property(&ControllerConfig::predict_control_s, "predict_control_s"),
         common::property(&ControllerConfig::forward_reach_thresh, "forward_reach_thresh"),
         common::property(&ControllerConfig::rotate_reach_thresh, "rotate_reach_thresh")
@@ -619,7 +621,7 @@ int test_tec(int argc, char **argv) {
         std::cout << "get sig " << sig;
         program_run = false;
     });
-    common::set_signal_handler(my_handler);
+    set_signal_handler(my_handler);
 
     plog::RollingFileAppender<plog::CsvFormatter> fileAppender("tec.csv", 20000000, 20); // Create the 1st appender.
     plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender; // Create the 2nd appender.
@@ -671,6 +673,7 @@ int test_tec(int argc, char **argv) {
     int rotate_command_speed = 1000;
 
     bool force_use_channel_0 = false;
+    int force_use_channel_id = 0;
 
     auto cli
             = lyra::exe_name(exe_name)
@@ -992,6 +995,8 @@ int test_tec(int argc, char **argv) {
     rosMessageManager.add_channel<common_message::Path>("PPUB:local_path:10");
     rosMessageManager.add_channel<common_message::Odometry>("PPUB:stable_pose:200");
     rosMessageManager.add_channel<common_message::HeaderString>("PPUB:status:200");
+    rosMessageManager.add_channel<common_message::HeaderString>("PPUB:controller_status:200");
+
     rosMessageManager.add_channel<std::vector<uint16_t >>("PPUB:error_code:200");
 
 
@@ -1036,6 +1041,7 @@ int test_tec(int argc, char **argv) {
     planner_stable_pose.header.frame_id.assign("map");
 
     common_message::HeaderString planner_status;
+    common_message::HeaderString controller_status;
 
 
     bool driver_comm_timeout = false;
@@ -1107,6 +1113,7 @@ int test_tec(int argc, char **argv) {
 
     }
 
+    bool is_any_fault_exist = false;
 
 
 
@@ -1134,8 +1141,8 @@ int test_tec(int argc, char **argv) {
     // stop/cancel : path size = 0
     // velocity constrains: ros param or embed in frame_id string
     // ros
-    auto planner_path_sub_cb = [&recv_cmd_vel_msg, &motion_planner, &motion_planner_error](void *data) {
-        if (motion_planner_error) {
+    auto planner_path_sub_cb = [&recv_cmd_vel_msg, &motion_planner, &motion_planner_error,&is_any_fault_exist](void *data) {
+        if (motion_planner_error || is_any_fault_exist) {
             return;
         }
         common_message::Path *data_ptr = static_cast<common_message::Path *>(data);
@@ -1152,7 +1159,7 @@ int test_tec(int argc, char **argv) {
 
 
     // goal callbak
-    auto planner_goal_sub_cb = [&driver_init_command, &recv_cmd_vel_msg, &motion_planner, &motion_planner_error](
+    auto planner_goal_sub_cb = [&driver_init_command, &recv_cmd_vel_msg, &motion_planner, &motion_planner_error,&is_any_fault_exist](
             void *data) {
         common_message::PoseStamped *data_ptr = static_cast<common_message::PoseStamped *>(data);
         {
@@ -1161,12 +1168,18 @@ int test_tec(int argc, char **argv) {
             recv_cmd_vel_msg.angular.z = 0.0;
         }
 
-        if (data_ptr->header.frame_id == "reset") {
+        if (data_ptr->header.frame_id == "reset_planner") {
             motion_planner.reset();
+//            driver_init_command = true;
+            return;
+        }
+        if (data_ptr->header.frame_id == "reset_controller") {
+//            motion_planner.reset();
             driver_init_command = true;
             return;
         }
-        if (motion_planner_error) {
+
+        if (motion_planner_error || is_any_fault_exist) {
             return;
         }
         motion_planner.requestGoal(*data_ptr);
@@ -1219,13 +1232,22 @@ int test_tec(int argc, char **argv) {
     // Initialization //
     // -------------- //
 
-    common::TaskManager taskManager;
+    common::TaskManager taskManager(20);
+    taskManager.set_loop(50,500);// 50hz 20ms
 
     std::cout << "This is an example which shows the usage of the Core library." << std::endl;
 
     // Create core.
     kaco::Core device;
     bool device_open_successful = false;
+
+    const size_t FRONT_FORWARD_ID = 1;
+    const size_t FRONT_ROTATE_ID = 2;
+    const size_t REAR_FORWARD_ID = 3;
+    const size_t REAR_ROTATE_ID = 4;
+
+    std::array<size_t, 4> driver_id_vec{FRONT_FORWARD_ID, FRONT_ROTATE_ID, REAR_FORWARD_ID, REAR_ROTATE_ID};
+
 
 
     const int MAX_MESSAGE_SIZE = 1000;
@@ -1236,7 +1258,7 @@ int test_tec(int argc, char **argv) {
 
         int channel = 0;
         if (force_use_channel_0) {
-            channel = 0;
+            channel = force_use_channel_id;
         }
 
         device.send(msg, channel);
@@ -1245,7 +1267,7 @@ int test_tec(int argc, char **argv) {
     auto send_to_channel_2 = [&](const auto &msg) {
         int channel = 1;
         if (force_use_channel_0) {
-            channel = 0;
+            channel = force_use_channel_id;
         }
 
         device.send(msg, channel);
@@ -1259,8 +1281,8 @@ int test_tec(int argc, char **argv) {
     std::vector<std::bitset<16>> device_node_emcy_array(DEVICE_NUM + 1);
 
     // initialise and enable
-    std::vector<kaco::Message> forward_driver_initializer_msg(4);
-    std::vector<kaco::Message> rotate_driver_initializer_msg(5);
+    std::vector<kaco::Message> forward_driver_initializer_msg(5);
+    std::vector<kaco::Message> rotate_driver_initializer_msg(6);
 
     // disable
     std::vector<kaco::Message> forward_driver_disable_msg(1);
@@ -1286,12 +1308,14 @@ int test_tec(int argc, char **argv) {
     forward_driver_initializer_msg[1] = kaco::Message{0x200, false, false, 3, {0x06, 0x00, 0x03, 0, 0, 0, 0, 0}};
     forward_driver_initializer_msg[2] = kaco::Message{0x200, false, false, 3, {0x07, 0x00, 0x03, 0, 0, 0, 0, 0}};
     forward_driver_initializer_msg[3] = kaco::Message{0x200, false, false, 3, {0x0f, 0x00, 0x03, 0, 0, 0, 0, 0}};
+    forward_driver_initializer_msg[4] =  kaco::Message{0x200, false, false, 3, {0x80, 0x00, 0x03, 0, 0, 0, 0, 0}};
 
     rotate_driver_initializer_msg[0] = kaco::Message{0x00, false, false, 2, {0x01, 0x00, 0x00, 0, 0, 0, 0, 0}};
     rotate_driver_initializer_msg[1] = kaco::Message{0x200, false, false, 3, {0x06, 0x00, 0x01, 0, 0, 0, 0, 0}};
     rotate_driver_initializer_msg[2] = kaco::Message{0x200, false, false, 3, {0x07, 0x00, 0x01, 0, 0, 0, 0, 0}};
     rotate_driver_initializer_msg[3] = kaco::Message{0x200, false, false, 3, {0x0f, 0x00, 0x01, 0, 0, 0, 0, 0}};
     rotate_driver_initializer_msg[4] = kaco::Message{0x200, false, false, 3, {0x3f, 0x00, 0x01, 0, 0, 0, 0, 0}};
+    rotate_driver_initializer_msg[5] = kaco::Message{0x200, false, false, 3, {0x80, 0x00, 0x01, 0, 0, 0, 0, 0}};
 
     driver_command_msg_channel_1[0] = kaco::Message{0x401, false, false, 4, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
     driver_command_msg_channel_1[1] = kaco::Message{0x302, false, false, 8, {0x00, 0x00, 0x00, 0, 0, 0, 0, 0}};
@@ -1320,7 +1344,7 @@ int test_tec(int argc, char **argv) {
         int channel = (driver_id <= 2) ? 0 : 1;
 
         if (force_use_channel_0) {
-            channel = 0;
+            channel = force_use_channel_id;
         }
         device.send(forward_driver_initializer_msg.data(), forward_driver_initializer_msg.size(), channel);
     };
@@ -1340,7 +1364,7 @@ int test_tec(int argc, char **argv) {
         int channel = (driver_id <= 2) ? 0 : 1;
 
         if (force_use_channel_0) {
-            channel = 0;
+            channel = force_use_channel_id;
         }
 
         device.send(rotate_driver_initializer_msg.data(), rotate_driver_initializer_msg.size(), channel);
@@ -1352,7 +1376,7 @@ int test_tec(int argc, char **argv) {
         }
         int channel = (driver_id <= 2) ? 0 : 1;
         if (force_use_channel_0) {
-            channel = 0;
+            channel = force_use_channel_id;
         }
         device.send(forward_driver_disable_msg.data(), forward_driver_disable_msg.size(), channel);
 
@@ -1364,7 +1388,7 @@ int test_tec(int argc, char **argv) {
         }
         int channel = (driver_id <= 2) ? 0 : 1;
         if (force_use_channel_0) {
-            channel = 0;
+            channel = force_use_channel_id;
         }
         device.send(rotate_driver_disable_msg.data(), rotate_driver_disable_msg.size(), channel);
 
@@ -1377,7 +1401,7 @@ int test_tec(int argc, char **argv) {
         }
         int channel = (driver_id <= 2) ? 0 : 1;
         if (force_use_channel_0) {
-            channel = 0;
+            channel = force_use_channel_id;
         }
         device.send(msg.data(), msg.size(), channel);
     };
@@ -1388,7 +1412,7 @@ int test_tec(int argc, char **argv) {
         }
         int channel = (driver_id <= 2) ? 0 : 1;
         if (force_use_channel_0) {
-            channel = 0;
+            channel = force_use_channel_id;
         }
         device.send(msg.data(), msg.size(), channel);
     };
@@ -1399,7 +1423,7 @@ int test_tec(int argc, char **argv) {
         }
         int channel = (driver_id <= 2) ? 0 : 1;
         if (force_use_channel_0) {
-            channel = 0;
+            channel = force_use_channel_id;
         }
         device.send(msg.data(), msg.size(), channel);
     };
@@ -1410,7 +1434,6 @@ int test_tec(int argc, char **argv) {
     bool is_rot_sensor_ready = false;
 
     bool is_all_operational = false;
-    bool is_any_fault_exist = false;
     bool is_stop_command = false;
     bool is_control_stop_command = false;
     bool is_command_need_recover = false;
@@ -1434,7 +1457,8 @@ int test_tec(int argc, char **argv) {
             device_node_emcy_array[message.get_node_id()] = *(u_int64_t *) (&message.data[3]);
         }
     };
-    std::array<size_t, 4> driver_id_vec{1, 2, 3, 4};
+
+
     auto check_all_state = [&]() {
 
         is_all_alive = true;
@@ -1448,13 +1472,38 @@ int test_tec(int argc, char **argv) {
 
     device.nmt.register_device_emcy_callback(node_emcy_cb);
 
-    std::vector<kaco::Message> send_message_array(6);
     bool is_stop_command_existed = false;
     bool is_enable_command_existed = false;
+
+    size_t control_wheel_flag = 0;
+
+    common::Time control_wheel_stamp = common::FromUnixNow();
+    size_t control_wheel_interval_max = 0;
+    size_t control_wheel_interval_actual = 0;
+
+//    std::tuple<std::atomic<bool>,std::atomic<bool>,std::atomic<float>,std::atomic<float>,std::atomic<float>,std::atomic<float>> control_wheel_param;
+   std::mutex control_wheel_param_mtx;
+
+    auto control_wheel_param = std::make_tuple(false, false, 0.0,0.0,0.0,0.0);
+    auto control_wheel_param_shared = std::make_tuple(false, false, 0.0,0.0,0.0,0.0);
+
 
     auto control_wheel = [&](bool enable, bool stop, float forward_vel_1, float rotate_angle_1, float forward_vel_2,
                              float rotate_angle_2) {
 
+        control_wheel_flag++;
+
+        if(control_wheel_flag > 10){
+            auto now = common::FromUnixNow();
+            auto dur =  now -  control_wheel_stamp;
+            control_wheel_interval_actual = common::ToMillSeconds(dur);
+            control_wheel_interval_max = std::max(control_wheel_interval_max,  (size_t)control_wheel_interval_actual );
+//            std::cout << "interval:" << interval << " ms, control_wheel_interval_max: " << control_wheel_interval_max << " us\n";
+//            PLOGF<< "interval:" << control_wheel_interval_actual << " ms, control_wheel_interval_max: " << control_wheel_interval_max << " ms";
+            control_wheel_stamp = now;
+        }else{
+            control_wheel_stamp = common::FromUnixNow();
+        }
 
         if (!enable_control || use_sim) {
             PLOGD << "enable_control is not set, or use_sim is set";
@@ -1462,21 +1511,23 @@ int test_tec(int argc, char **argv) {
         }
         if (!is_all_alive || !is_all_initialised) {
             PLOGD << "not is_all_alive or not is_all_initialised";
-            send_node_guard(1);
-            send_node_guard(2);
-            send_node_guard(3);
-            send_node_guard(4);
+            send_node_guard(FRONT_FORWARD_ID);
+            send_node_guard(FRONT_ROTATE_ID);
+            send_node_guard(REAR_FORWARD_ID);
+            send_node_guard(REAR_ROTATE_ID);
             return;
         }
 
         PLOGD << "control_wheel :[enable]: " << enable;
 
+        forward_vel_1 = forward_vel_1* enable;
+        forward_vel_2 = forward_vel_2* enable;
 
-        if (enable) {
+        {
 
-            std::cout << "control_wheel 1:[forward_vel, rotate_angle]: " << forward_vel_1 << ", " << rotate_angle_1
+            PLOGD << "control_wheel 1:[forward_vel, rotate_angle]: " << forward_vel_1 << ", " << rotate_angle_1
                       << std::endl;
-            std::cout << "control_wheel 2:[forward_vel, rotate_angle]: " << forward_vel_2 << ", " << rotate_angle_2
+            PLOGD << "control_wheel 2:[forward_vel, rotate_angle]: " << forward_vel_2 << ", " << rotate_angle_2
                       << std::endl;
 
             PLOGD << "SteerConfigArray[0].use_rot_angle_abs: " << SteerConfigArray[0].use_rot_angle_abs;
@@ -1500,61 +1551,72 @@ int test_tec(int argc, char **argv) {
                     SteerConfigArray[1].rot_angle_k);
             *(int *) (&driver_command_msg_channel_2[1].data[4]) = rotate_command_speed;
 
-#if 1
-            std::cout << "send can data to channel 1";
+#if 0
+            PLOGD<< "send can data to channel 1";
             driver_command_msg_channel_1[0].print();
             driver_command_msg_channel_1[1].print();
 
 
-            std::cout << "send can data to channel 2";
+            PLOGD << "send can data to channel 2";
             driver_command_msg_channel_2[0].print();
             driver_command_msg_channel_2[1].print();
 #endif
 
-            int channel = 0;
-            if (force_use_channel_0) {
-                channel = 0;
+            if(enable || is_enable_command_existed || (control_wheel_flag%100 == 0))
+
+            {
+                int channel = 0;
+                if (force_use_channel_0) {
+                    channel = force_use_channel_id;
+                }
+
+                device.send(driver_command_msg_channel_1.data(), driver_command_msg_channel_1.size(), channel);
+
+                channel = 1;
+                if (force_use_channel_0) {
+                    channel = force_use_channel_id;
+                }
+                device.send(driver_command_msg_channel_2.data(), driver_command_msg_channel_2.size(), channel);
             }
 
-            device.send(driver_command_msg_channel_1.data(), driver_command_msg_channel_1.size(), channel);
 
-            channel = 1;
-            if (force_use_channel_0) {
-                channel = 0;
-            }
-            device.send(driver_command_msg_channel_2.data(), driver_command_msg_channel_2.size(), channel);
+        }
 
+
+
+        if (enable){
             if (stop) {
-                disable_forward_driver(1);
-                disable_forward_driver(3);
+                disable_forward_driver(FRONT_FORWARD_ID);
+                disable_forward_driver(REAR_FORWARD_ID);
             } else {
 
 
                 if (!is_enable_command_existed) {
-                    initialise_forward_driver(1);
-                    initialise_rotate_driver(2);
-                    initialise_forward_driver(3);
-                    initialise_rotate_driver(4);
+                    initialise_forward_driver(FRONT_FORWARD_ID);
+                    initialise_rotate_driver(FRONT_ROTATE_ID);
+                    initialise_forward_driver(REAR_FORWARD_ID);
+                    initialise_rotate_driver(REAR_ROTATE_ID);
 
                 }
                 if (is_stop_command_existed) {
-                    initialise_forward_driver(1);
-                    initialise_forward_driver(3);
+                    initialise_forward_driver(FRONT_FORWARD_ID);
+                    initialise_rotate_driver(FRONT_ROTATE_ID);
+                    initialise_forward_driver(REAR_FORWARD_ID);
+                    initialise_rotate_driver(REAR_ROTATE_ID);
                 }
             }
 
+        }else{
+            disable_forward_driver(FRONT_FORWARD_ID);
+            disable_rotate_driver(FRONT_ROTATE_ID);
 
-        } else {
-            disable_forward_driver(1);
-            disable_rotate_driver(2);
+            disable_forward_driver(REAR_FORWARD_ID);
+            disable_rotate_driver(REAR_ROTATE_ID);
 
-            disable_forward_driver(3);
-            disable_rotate_driver(4);
-
-            send_node_guard(1);
-            send_node_guard(2);
-            send_node_guard(3);
-            send_node_guard(4);
+            send_node_guard(FRONT_FORWARD_ID);
+            send_node_guard(FRONT_ROTATE_ID);
+            send_node_guard(REAR_FORWARD_ID);
+            send_node_guard(REAR_ROTATE_ID);
 
         }
 
@@ -1671,16 +1733,16 @@ int test_tec(int argc, char **argv) {
         device.pdo.add_pdo_received_callback(0x180 + forward_driver_id,
                                              [i, &update_wheel_forward](const kaco::Message &message) {
 
-                                                 std::cout << "forward : " << int(message.get_node_id()) << std::endl;
-                                                 message.print();
+//                                                 std::cout << "forward : " << int(message.get_node_id()) << std::endl;
+//                                                 message.print();
                                                  update_wheel_forward(i, message);
 
                                              });
 
         device.pdo.add_pdo_received_callback(0x180 + rotate_driver_id,
                                              [i, &update_wheel_rotate](const kaco::Message &message) {
-                                                 std::cout << "rotate : " << int(message.get_node_id()) << std::endl;
-                                                 message.print();
+//                                                 std::cout << "rotate : " << int(message.get_node_id()) << std::endl;
+//                                                 message.print();
                                                  update_wheel_rotate(i, message);
                                              });
 #if 0
@@ -1778,7 +1840,7 @@ int test_tec(int argc, char **argv) {
             }
 
         };
-        taskManager.addTask([&rosMessageManager, &c, &device, &can_channel_send_msg, can_message_sub_cb] {
+        taskManager.add_task("can_forward_send",[&rosMessageManager, &c, &device, &can_channel_send_msg, can_message_sub_cb] {
 
             char key_buffer[100];
             sprintf(key_buffer, "SUB:%s", c.sub_topic.c_str());
@@ -1794,8 +1856,8 @@ int test_tec(int argc, char **argv) {
             can_channel_send_msg[c.channel_id].clear();
 
             return true;
-        }, 100 * 1000, 2);
-        taskManager.addTask([&rosMessageManager, &c, &can_channel_forward_msg] {
+        }, 4,100);// 5*20 ms
+        taskManager.add_task("can_forward_recv",[&rosMessageManager, &c, &can_channel_forward_msg] {
             if (can_channel_forward_msg[c.channel_id].messages.empty()) {
                 return true;
             }
@@ -1805,7 +1867,7 @@ int test_tec(int argc, char **argv) {
             rosMessageManager.send_message(key_buffer, &can_channel_forward_msg[c.channel_id], 1, 0.1);
             can_channel_forward_msg[c.channel_id].messages.clear();
             return true;
-        }, 100 * 1000, 2);
+        }, 4,100);// 5*20 ms
 
     }
     // controller
@@ -1832,6 +1894,8 @@ int test_tec(int argc, char **argv) {
         wheels_array[i].forward_reach_thresh = SteerConfigArray[i].forward_reach_thresh;
         wheels_array[i].rotate_reach_thresh = SteerConfigArray[i].rotate_reach_thresh;
         wheels_array[i].action_timeout_s = SteerConfigArray[i].action_timeout_s;
+        wheels_array[i].comm_timeout_s = SteerConfigArray[i].comm_timeout_s;
+
     }
 
 
@@ -1854,7 +1918,7 @@ int test_tec(int argc, char **argv) {
     planner_odom_base_tf.target_frame.assign("base_link");
 
 
-    taskManager.addTask([&] {
+    taskManager.add_task("motion_planner.updateOdom",[&] {
 
         // lookup tf map base_link
         // lookup tf odom base_link
@@ -1876,15 +1940,15 @@ int test_tec(int argc, char **argv) {
 
         motion_planner.updateOdom(odom);
 
-        bool get_pose = motion_planner.getStablePose();
+//        bool get_pose = motion_planner.getStablePose();
 
 
-        PLOGD << "motion planner: get_pose: " << get_pose;
+//        PLOGD << "motion planner: get_pose: " << get_pose;
 
         return true;
-    }, 10 * 1000, 0);
+    }, 1,1000);// 2*20 ms
 
-    taskManager.addTask([&] {
+    taskManager.add_task("update_status",[&] {
         auto now = common::FromUnixNow();
 
 
@@ -1964,8 +2028,12 @@ int test_tec(int argc, char **argv) {
             is_any_fault_exist = true;
         }
         if (is_any_fault_exist) {
-            motion_planner.reset();
-            motion_planner_error = true;
+            char error_code_buff[200];
+            sprintf(error_code_buff,"driver_error: driver_error_code : [%04X, %04X, %04X, %04X]",driver_error_code[0],driver_error_code[1],driver_error_code[2],driver_error_code[3]);
+            planner_status.data.assign(error_code_buff);
+
+//            motion_planner.reset();
+//            motion_planner_error = true;
         }
 
 
@@ -1977,9 +2045,21 @@ int test_tec(int argc, char **argv) {
 
         rosMessageManager.send_message("PPUB:status", &planner_status, 1, 0.1);
 
+        {
+
+            char error_code_buff[200];
+            sprintf(error_code_buff,"\ncontroller_status: control_wheel_interval_actual : %zu, control_wheel_interval_max : %zu\n",
+                    control_wheel_interval_actual,control_wheel_interval_max );
+            auto s = taskManager.report();
+            s << error_code_buff;
+
+            controller_status.data.assign(s.str().c_str());
+            rosMessageManager.send_message("PPUB:controller_status", &controller_status, 1, 0.1);
+
+        }
 
         return true;
-    }, 100 * 1000, 1);
+    } , 4,1000);// 5*20 ms
 
     common_message::TransformStamped send_map_odom_tf, send_odom_base_tf;
     send_map_odom_tf.base_frame.assign("map");
@@ -2005,32 +2085,46 @@ int test_tec(int argc, char **argv) {
         }
 
         if (device_open_successful) {
-            taskManager.addTask([&] {
+//            taskManager.addTask([&] {
+//
+//                // if not operational, send nmt start
+////            if(!is_all_alive){
+////                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_1);
+////                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_2);
+////            }
+//                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node, send_to_channel_1);
+//                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node, send_to_channel_2);
+//
+//                return true;
+//            }, 1000 * 1000, 0);
 
-                check_all_state();
-                // if not operational, send nmt start
-//            if(!is_all_alive){
-//                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_1);
-//                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node,send_to_channel_2);
-//            }
-                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node, send_to_channel_1);
-                device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node, send_to_channel_2);
 
 
+
+
+#if 0
+            taskManager.add_task([&] {
+                control_wheel(std::get<0>(control_wheel_param),
+                              std::get<1>(control_wheel_param),
+                              std::get<2>(control_wheel_param),
+                              std::get<3>(control_wheel_param),
+                              std::get<4>(control_wheel_param),
+                              std::get<5>(control_wheel_param));
                 return true;
-            }, 1000 * 1000, 0);
+            }, 0,1);// 1*20 ms
+#endif
 
-            taskManager.addTask([&] {
-                device.nmt.send_sync_message(send_to_channel_1);
-                device.nmt.send_sync_message(send_to_channel_2);
+
+
+            taskManager.add_task("device.recv_message",[&] {
                 device.recv_message(message_buffer, 0, message_buffer.size());
                 device.recv_message(message_buffer, 1, message_buffer.size());
+                check_all_state();
                 return true;
-            }, 5 * 1000, 0);
-
+            }, 2,10);// 3*20 ms
 
             // initializer
-            taskManager.addTask([&] {
+            taskManager.add_task("driver_initializer_1",[&] {
 //            PLOGF.printf("driver error:is_all_alive : %i, driver_action_timeout : %i,  ",is_all_alive, driver_action_timeout);
 
                 if (is_all_alive) {
@@ -2052,28 +2146,29 @@ int test_tec(int argc, char **argv) {
 
                         is_all_initialise_triggered = true;
                         is_all_initialised = false;
-                        taskManager.addTask([&] {
+                        taskManager.add_task("driver_initializer_2",[&] {
 
 
                             if (!is_all_initialised) {
-                                initialise_forward_driver(1);
-                                initialise_rotate_driver(2);
+                                initialise_forward_driver(FRONT_FORWARD_ID);
+                                initialise_rotate_driver(FRONT_ROTATE_ID);
 
-                                initialise_forward_driver(3);
-                                initialise_rotate_driver(4);
+                                initialise_forward_driver(REAR_FORWARD_ID);
+                                initialise_rotate_driver(REAR_ROTATE_ID);
 
-                                reset_forward_driver(1);
-                                reset_rotate_driver(2);
-                                reset_forward_driver(3);
-                                reset_rotate_driver(4);
+                                reset_forward_driver(FRONT_FORWARD_ID);
+                                reset_rotate_driver(FRONT_ROTATE_ID);
+                                reset_forward_driver(REAR_FORWARD_ID);
+                                reset_rotate_driver(REAR_ROTATE_ID);
 
 
-                                taskManager.addTask([&] {
+                                taskManager.add_task("driver_initializer_3",[&] {
                                     is_any_fault_exist = false;
                                     motion_planner_error = false;
                                     driver_action_timeout = false;
                                     driver_comm_timeout = false;
                                     is_all_initialised = true;
+                                    control_wheel_interval_max = 0;
 
 
                                     auto now = common::FromUnixNow();
@@ -2087,12 +2182,12 @@ int test_tec(int argc, char **argv) {
 
                                     std::fill(driver_error_code.begin(), driver_error_code.end(), 0);
                                     return false;
-                                }, initialise_wait_s * 1000 * 1000, 0);
+                                },100,  initialise_wait_s * 1000 * 1000 );
                             }
 
 
                             return false;
-                        }, 100 * 1000, 0);
+                        }, 100, 1000*1000);
 
 
                     }
@@ -2136,17 +2231,17 @@ int test_tec(int argc, char **argv) {
 
 
                 return true;
-            }, 50 * 1000, 1);
+            }, 100, 1000*1000);
 
             // rot
-            taskManager.addTask([&] {
+            taskManager.add_task("is_rot_sensor_ready",[&] {
                 is_rot_sensor_ready = true;
                 for (size_t i = 0; i < SteerConfigArray.size(); i++) {
                     SteerConfigArray[i].angleCalib();
                     is_rot_sensor_ready = is_rot_sensor_ready && SteerConfigArray[i].isAngleCalib();
                 }
                 return true;
-            }, 500 * 1000, 1);
+            }, 4, 500); //5*20ms
         }
 
 
@@ -2154,7 +2249,7 @@ int test_tec(int argc, char **argv) {
 
         device_open_successful = true;
 
-        taskManager.addTask([&] {
+        taskManager.add_task("sim send path",[&] {
 
             if (path_config.empty()) {
                 return false;
@@ -2168,10 +2263,10 @@ int test_tec(int argc, char **argv) {
 
 
             return false;
-        }, 2 * 1000 * 1000, 1);
+        }, 30,1000*1000);//11*20ms
 
 
-        taskManager.addTask([&] {
+        taskManager.add_task("sim update state",[&] {
 
 
             smoothSimulator.updateState(controller.m_steer_wheel[0].getCommandForwardVel(),
@@ -2208,7 +2303,7 @@ int test_tec(int argc, char **argv) {
             is_rot_sensor_ready = true;
 
             return true;
-        }, 20 * 1000, 0);
+        },0,100);// simulator
 
     }
 
@@ -2232,7 +2327,7 @@ int test_tec(int argc, char **argv) {
 #endif
 
     // odom
-    taskManager.addTask([&] {
+    taskManager.add_task("odom",[&] {
 
 
         PLOGD << "is_all_alive: " << is_all_alive;
@@ -2402,13 +2497,13 @@ int test_tec(int argc, char **argv) {
 
 
         return true;
-    }, 15 * 1000, 1);
+    },1,10); // 2*20ms
 
     // cmd_vel
     int cmd_vel_timeout_counter = 0;
     if (!enable_fix_command) {
         PLOGD << "add cmd_vel command";
-        taskManager.addTask([&] {
+        taskManager.add_task("control",[&] {
 
             //todo: remove
 //            is_any_fault_exist = false;
@@ -2562,11 +2657,18 @@ int test_tec(int argc, char **argv) {
                                 std::min(1.918888889f, command.command[0]), -1.918888889f);
 
 //                        PLOGF << "steer command: " << command.command[0];
+                        {
+                            std::lock_guard<std::mutex> locker(control_wheel_param_mtx);
 
-                        control_wheel(true, false, controller.m_steer_wheel[0].getCommandForwardVel(),
-                                      controller.m_steer_wheel[0].getCommandRotateAngle(),
-                                      controller.m_steer_wheel[1].getCommandForwardVel(),
-                                      controller.m_steer_wheel[1].getCommandRotateAngle());
+                            control_wheel_param = std::make_tuple(true, false, controller.m_steer_wheel[0].getCommandForwardVel(),
+                                                                  controller.m_steer_wheel[0].getCommandRotateAngle(),
+                                                                  controller.m_steer_wheel[1].getCommandForwardVel(),
+                                                                  controller.m_steer_wheel[1].getCommandRotateAngle());
+                        }
+//                        control_wheel(true, false, controller.m_steer_wheel[0].getCommandForwardVel(),
+//                                      controller.m_steer_wheel[0].getCommandRotateAngle(),
+//                                      controller.m_steer_wheel[1].getCommandForwardVel(),
+//                                      controller.m_steer_wheel[1].getCommandRotateAngle());
                         recv_cmd_vel_msg.linear.x = 0.0;
                         recv_cmd_vel_msg.linear.y = 0.0;
                         recv_cmd_vel_msg.angular.z = 0.0;
@@ -2660,27 +2762,34 @@ int test_tec(int argc, char **argv) {
                       << controller.m_steer_wheel[1].getCommandForwardVel();
 
 
-                is_stop_command = std::abs(recv_cmd_vel_msg.linear.x) < 0.001
-                                  && std::abs(recv_cmd_vel_msg.linear.y) < 0.001
-                                  && std::abs(recv_cmd_vel_msg.angular.z) < 0.001;
+                is_stop_command = std::abs(recv_cmd_vel_msg.linear.x) < 0.015
+                                  && std::abs(recv_cmd_vel_msg.linear.y) < 0.015
+                                  && std::abs(recv_cmd_vel_msg.angular.z) < 0.015;
 
-                bool is_stopped = std::abs(odom.twist.twist.linear.x) < 0.001
-                                  && std::abs(odom.twist.twist.linear.y) < 0.001
-                                  && std::abs(odom.twist.twist.angular.z) < 0.001;
+                bool is_stopped = std::abs(odom.twist.twist.linear.x) < 0.015
+                                  && std::abs(odom.twist.twist.linear.y) < 0.015
+                                  && std::abs(odom.twist.twist.angular.z) < 0.015;
+                {
+                    std::lock_guard<std::mutex> locker(control_wheel_param_mtx);
 
+                    // can send
+                    control_wheel_param = std::make_tuple(true, is_stop_command && is_stopped, controller.m_steer_wheel[0].getCommandForwardVel(),
+                                                          controller.m_steer_wheel[0].getCommandRotateAngle(),
+                                                          controller.m_steer_wheel[1].getCommandForwardVel(),
+                                                          controller.m_steer_wheel[1].getCommandRotateAngle());
+                }
 
-                // can send
-
-                control_wheel(true, is_stop_command && is_stopped, controller.m_steer_wheel[0].getCommandForwardVel(),
-                              controller.m_steer_wheel[0].getCommandRotateAngle(),
-                              controller.m_steer_wheel[1].getCommandForwardVel(),
-                              controller.m_steer_wheel[1].getCommandRotateAngle());
+//                control_wheel(true, is_stop_command && is_stopped, controller.m_steer_wheel[0].getCommandForwardVel(),
+//                              controller.m_steer_wheel[0].getCommandRotateAngle(),
+//                              controller.m_steer_wheel[1].getCommandForwardVel(),
+//                              controller.m_steer_wheel[1].getCommandRotateAngle());
 
                 return true;
             } else {
                 PLOGD << "driver not ready, cmd_vel reset";
-                motion_planner.reset();
+//                motion_planner.reset();
                 controller.bypass();
+                rosMessageManager.recv_message("SUB:control_cmd_vel", 10, 0.001, cmd_vel_sub_cb);
 
                 recv_cmd_vel_msg.linear.x = 0.0;
                 recv_cmd_vel_msg.linear.y = 0.0;
@@ -2690,11 +2799,19 @@ int test_tec(int argc, char **argv) {
                 send_cmd_vel.angular.z = 0.0;
                 controller.m_steer_wheel[0].getCommandForwardVel() = 0.0f;
                 controller.m_steer_wheel[1].getCommandForwardVel() = 0.0f;
+                {
+                    std::lock_guard<std::mutex> locker(control_wheel_param_mtx);
 
-                control_wheel(false, true, controller.m_steer_wheel[0].getCommandForwardVel(),
-                              controller.m_steer_wheel[0].getCommandRotateAngle(),
-                              controller.m_steer_wheel[1].getCommandForwardVel(),
-                              controller.m_steer_wheel[1].getCommandRotateAngle());
+                    control_wheel_param = std::make_tuple(false, true, controller.m_steer_wheel[0].getCommandForwardVel(),
+                                                          controller.m_steer_wheel[0].getCommandRotateAngle(),
+                                                          controller.m_steer_wheel[1].getCommandForwardVel(),
+                                                          controller.m_steer_wheel[1].getCommandRotateAngle());
+                }
+
+//                control_wheel(false, true, controller.m_steer_wheel[0].getCommandForwardVel(),
+//                              controller.m_steer_wheel[0].getCommandRotateAngle(),
+//                              controller.m_steer_wheel[1].getCommandForwardVel(),
+//                              controller.m_steer_wheel[1].getCommandRotateAngle());
 
                 return true;
 
@@ -2702,13 +2819,13 @@ int test_tec(int argc, char **argv) {
 
 
             return true;
-        }, 5 * 1000, 1);
+        }, 1,5);//2*20ms
 
     } else {
         PLOGD << "add fix command";
 
-        taskManager.addTask(
-                [&controller, &control_wheel, &command_array, &mqttMessageManager, &mqtt_sub_topic, &lua_cb] {
+        taskManager.add_task("fix command",
+                [&controller, &control_wheel,&control_wheel_param, &command_array, &mqttMessageManager, &mqtt_sub_topic, &lua_cb,&control_wheel_param_mtx] {
 
                     mqttMessageManager.recv_message(mqtt_sub_topic.c_str(), 10, 0.01, lua_cb);
 
@@ -2722,11 +2839,16 @@ int test_tec(int argc, char **argv) {
 
                     PLOGD << "send fix command: " << command_array[0] << ", " << command_array[1] << ", "
                           << command_array[2] << ", " << command_array[3];
+                    {
+                        std::lock_guard<std::mutex> locker(control_wheel_param_mtx);
 
-                    control_wheel(true, false, command_array[0], command_array[1], command_array[2], command_array[3]);
+                        control_wheel_param = std::make_tuple(true, false, command_array[0], command_array[1], command_array[2], command_array[3]);
+                    }
+
+//                    control_wheel(true, false, command_array[0], command_array[1], command_array[2], command_array[3]);
 
                     return true;
-                }, 100 * 1000, 0);
+                }, 0,100);
 
     }
 
@@ -2740,15 +2862,50 @@ int test_tec(int argc, char **argv) {
     // driver initializer
 
     PLOGD << "start loop, " << program_run;
+    std::thread can_send_loop = std::thread(
+            [&]{
+                common::LoopHelper loopHelper;
+                loopHelper.set_fps(50.0);
+                while (program_run ){
+                    loopHelper.start();
+                    {
+
+                        {
+                            std::lock_guard<std::mutex> locker(control_wheel_param_mtx);
+
+                            control_wheel_param_shared = control_wheel_param;
+                        }
+//                                std::lock_guard<std::mutex> lock(m_send_mtx);
+                        control_wheel(std::get<0>(control_wheel_param_shared),
+                                      std::get<1>(control_wheel_param_shared),
+                                      std::get<2>(control_wheel_param_shared),
+                                      std::get<3>(control_wheel_param_shared),
+                                      std::get<4>(control_wheel_param_shared),
+                                      std::get<5>(control_wheel_param_shared));
+
+//                        device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node, send_to_channel_1);
+//                        device.nmt.broadcast_nmt_message(kaco::NMT::Command::start_node, send_to_channel_2);
+                    }
+
+                    loopHelper.sleep();
+                }
+            }
+    );
     while (program_run && rosMessageManager.is_running()) {
 
         taskManager.call();
 
 
     }
+    program_run = false;
+
+    if (can_send_loop.joinable()){
+        can_send_loop.join();
+    }
     PLOGD << "end loop, " << program_run;
 
     control_wheel(false, true, 0.0, 0.0, 0.0, 0.0);
+
 
 
     mqttMessageManager.stop();

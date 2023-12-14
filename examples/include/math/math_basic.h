@@ -8,8 +8,20 @@
 #include <cmath>
 #include <type_traits>
 
+//https://stackoverflow.com/questions/2320986/easy-way-to-keeping-angles-between-179-and-180-degrees
+
 #define angle_normalise_zero(angle) std::abs(angle) < M_PIf32 ? (angle) : ( angle + ((angle) > 0.0f ? -M_PIf32*2.0f: M_PIf32*2.0f) )
+//#define angle_normalise_zero(angle) (angle - (std::ceil((angle + M_PIf32)/(2*M_PIf32))-1)*2*M_PIf32)
+
 #define angle_normalise(angle, angle_mean)  ((std::abs(angle - angle_mean ) < M_PIf32 )? (angle) : ( angle + ((angle - angle_mean) > 0.0f ? -M_PIf32*2.0f: M_PIf32*2.0f) ))
+
+
+inline float angle_normal(float angle){
+    float normalizedAngle = angle - (ceil((angle + M_PI)/(2*M_PI))-1)*2*M_PI;  // (-Pi;Pi]:
+
+    return normalizedAngle;
+}
+
 
 namespace math{
 //    https://stackoverflow.com/questions/14369673/round-double-to-3-points-decimal
